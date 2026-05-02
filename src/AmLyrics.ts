@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.4.0';
+const VERSION = '1.4.1';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -4626,12 +4626,13 @@ export class AmLyrics extends LitElement {
       return;
     }
 
-    // Skip scroll if near the bottom of content (prevents footer jitter)
+    // Skip scroll if near the bottom of content and we aren't trying to scroll back up
     if (!forceScroll && !activeLine.classList.contains('lyrics-footer')) {
       const parent = this.lyricsContainer;
       const atBottom =
         parent.scrollTop + parent.clientHeight >= parent.scrollHeight - 50;
-      if (atBottom) {
+      const targetTop = Math.max(0, -(paddingTop - activeLine.offsetTop));
+      if (atBottom && targetTop > parent.scrollTop - 50) {
         return;
       }
     }
@@ -5295,7 +5296,7 @@ export class AmLyrics extends LitElement {
                   syllable.romanizedText &&
                   syllable.romanizedText.trim() !== syllable.text.trim()
                     ? html`<span
-                        class="lyrics-syllable transliteration ${syllable.lineSynced
+                        class="lyrics-syllable transliteration no-chars ${syllable.lineSynced
                           ? 'line-synced'
                           : ''}"
                         data-start-time="${startTimeMs}"
@@ -5396,7 +5397,7 @@ export class AmLyrics extends LitElement {
                   syllable.romanizedText &&
                   syllable.romanizedText.trim() !== syllable.text.trim()
                     ? html`<span
-                        class="lyrics-syllable transliteration ${groupLineSynced
+                        class="lyrics-syllable transliteration no-chars ${groupLineSynced
                           ? 'line-synced'
                           : ''}"
                         data-start-time="${startTimeMs}"
