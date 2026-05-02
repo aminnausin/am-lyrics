@@ -34,7 +34,6 @@ Or, just use the CDN.
   current-time="0"
   duration=""
   highlight-color="#f00"
-  hover-background-color="#e0e0e0"
   font-family="'Inter', Arial, sans-serif"
   autoscroll
   interpolate
@@ -55,7 +54,6 @@ Or, just use the CDN.
 | `current-time`           | `number`  | `0`         | Current playback time in milliseconds                                                          |
 | `duration`               | `number`  | `undefined` | Playback timer duration in milliseconds. **Set to `-1` to reset/stop playback**                |
 | `highlight-color`        | `string`  | `"#000"`    | Color for highlighted/active lyrics                                                            |
-| `hover-background-color` | `string`  | `"#f0f0f0"` | Background color on line hover                                                                 |
 | ~~`hide-source-footer`~~ | `boolean` | `false`     | Hide/show the source attribution footer                                                        |
 | `font-family`            | `string`  | `undefined` | Custom font family for lyrics                                                                  |
 | `autoscroll`             | `boolean` | `true`      | Enable automatic scrolling to active lyrics                                                    |
@@ -69,9 +67,6 @@ You can customize the appearance using CSS custom properties:
 am-lyrics {
   /* Highlight color for active lyrics */
   --am-lyrics-highlight-color: #007aff;
-
-  /* Hover background color (fallback) */
-  --hover-background-color: #f5f5f5;
 
   /* Alternative highlight color (fallback) */
   --highlight-color: #000;
