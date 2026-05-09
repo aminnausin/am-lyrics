@@ -8,6 +8,9 @@
   "main": "dist/src/index.js",
   "module": "dist/src/index.js",
   "types": "dist/src/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": "./dist/src/index.js",
     "./am-lyrics.js": "./dist/src/am-lyrics.js",
