@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.5.0';
+const VERSION = '1.5.1';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -606,21 +606,21 @@ export class AmLyrics extends LitElement {
     .lyrics-line.active:not(.lyrics-gap)
       .lyrics-word:not(.growable)
       .lyrics-syllable.highlight {
-      transform: translateY(-3.5%);
+      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
     }
 
     .lyrics-line.persist-highlight:not(.lyrics-gap)
       .lyrics-word:not(.growable)
       .lyrics-syllable.finished {
-      transform: translateY(-3.5%);
+      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
     }
 
     .lyrics-word.growable .lyrics-syllable.cleanup .char {
-      transform: translateY(-3.5%);
+      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
     }
 
     .lyrics-word.char-rise .lyrics-syllable.cleanup .char {
-      transform: translateY(-3.5%);
+      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
     }
 
     .lyrics-line.persist-highlight
@@ -631,7 +631,7 @@ export class AmLyrics extends LitElement {
       .lyrics-word.char-rise
       .lyrics-syllable.finished
       .char {
-      transform: translateY(-3.5%);
+      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
     }
 
     /* Background vocal overrides — placed AFTER main rules so they win
@@ -3689,6 +3689,19 @@ export class AmLyrics extends LitElement {
       const currentGap = this.findInstrumentalGapAt(newTime);
       if (currentGap) {
         this.lastInstrumentalIndex = currentGap.insertBeforeIndex;
+        // Un-highlight the previous line immediately when gap dots are playing
+        if (currentGap.insertBeforeIndex > 0) {
+          const prevLine = this._getLineElement(
+            currentGap.insertBeforeIndex - 1,
+          );
+          if (
+            prevLine &&
+            prevLine.classList.contains('persist-highlight') &&
+            !prevLine.classList.contains('active')
+          ) {
+            AmLyrics.unfinishSyllables(prevLine);
+          }
+        }
       } else if (this.lastInstrumentalIndex !== null) {
         this.lastInstrumentalIndex = null;
       }
@@ -3885,34 +3898,39 @@ export class AmLyrics extends LitElement {
     const predictiveTime = this.currentTime + scrollLookAheadMs;
     const predictiveActiveIndices = this.findActiveLineIndices(predictiveTime);
 
-    let targetLineIndex: number | null;
+    let targetElement: HTMLElement | null = null;
+
     if (predictiveActiveIndices.length > 0) {
-      targetLineIndex = this.getPrimaryScrollLineIndex(
+      const targetLineIdx = this.getPrimaryScrollLineIndex(
         predictiveActiveIndices,
         predictiveTime,
       );
-    } else {
-      // Fallback: closest line before predictiveTime
-      targetLineIndex = this.getLineIndexAtTime(predictiveTime, 0);
+      if (targetLineIdx !== null && targetLineIdx !== -1) {
+        targetElement = this._getLineElement(targetLineIdx);
+      }
     }
 
-    if (targetLineIndex === null || targetLineIndex === -1) return;
-
-    const targetLine = this._getLineElement(targetLineIndex);
-    if (!targetLine) return;
+    if (!targetElement) {
+      // Fallback: closest line before predictiveTime
+      const targetLineIdx = this.getLineIndexAtTime(predictiveTime, 0);
+      if (targetLineIdx !== null && targetLineIdx !== -1) {
+        targetElement = this._getLineElement(targetLineIdx);
+      }
+    }
+    if (!targetElement) return;
 
     // Unblur the upcoming target line early (pre-active) so background
     // vocals start their max-height/opacity transition in sync with scroll.
-    if (!targetLine.classList.contains('active')) {
-      targetLine.classList.add('pre-active');
-      if (!this.preActiveLineElements.includes(targetLine)) {
-        this.preActiveLineElements.push(targetLine);
+    if (!targetElement.classList.contains('active')) {
+      targetElement.classList.add('pre-active');
+      if (!this.preActiveLineElements.includes(targetElement)) {
+        this.preActiveLineElements.push(targetElement);
       }
     }
 
     const scrollDuration = scrollLookAheadMs;
 
-    this.focusLine(targetLine, forceScroll, scrollDuration);
+    this.focusLine(targetElement, forceScroll, scrollDuration);
   }
 
   private _textWidthCanvas: HTMLCanvasElement | undefined;
@@ -5551,7 +5569,20 @@ export class AmLyrics extends LitElement {
         syllable.style.removeProperty('--pre-wipe-delay');
         const chars = syllable.querySelectorAll('span.char');
         for (let ci = 0; ci < chars.length; ci += 1) {
-          (chars[ci] as HTMLElement).style.animation = '';
+          const charEl = chars[ci] as HTMLElement;
+          const currentAnim = charEl.style.animation || '';
+          if (
+            currentAnim.includes('grow-dynamic') ||
+            currentAnim.includes('rise-char')
+          ) {
+            const parts = currentAnim.split(',').map(p => p.trim());
+            const transformAnim = parts.find(
+              p => p.includes('grow-dynamic') || p.includes('rise-char'),
+            );
+            charEl.style.animation = transformAnim || '';
+          } else {
+            charEl.style.animation = '';
+          }
         }
       }
     }
