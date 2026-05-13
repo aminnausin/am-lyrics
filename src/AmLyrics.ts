@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.5.2';
+const VERSION = '1.5.3';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -1542,6 +1542,9 @@ export class AmLyrics extends LitElement {
   @property({ type: String })
   isrc?: string;
 
+  @property({ type: String })
+  ttml?: string;
+
   @property({ type: String, attribute: 'song-title' })
   songTitle?: string;
 
@@ -1927,6 +1930,29 @@ export class AmLyrics extends LitElement {
     this.hasFetchedAllProviders = false;
     this._updateFooter();
     try {
+      if (this.ttml) {
+        const parseResult = AmLyrics.parseTTML(this.ttml);
+        if (parseResult && parseResult.lines.length > 0) {
+          this.lyrics = parseResult.lines;
+          this.lyricsSource = 'Local';
+          if (parseResult.songwriters) {
+            this.songwriters = parseResult.songwriters;
+          }
+          this.availableSources = [
+            {
+              lines: this.lyrics,
+              source: 'Local',
+              songwriters: this.songwriters,
+            },
+          ];
+          this.currentSourceIndex = 0;
+          this.hasFetchedAllProviders = true;
+          this._updateFooter();
+          await this.onLyricsLoaded();
+          return;
+        }
+      }
+
       const resolvedMetadata = await this.resolveSongMetadata();
       // If a newer fetch was triggered while we awaited, bail out
       if (controller.signal.aborted) return;
@@ -3886,6 +3912,7 @@ export class AmLyrics extends LitElement {
       (changedProperties.has('query') ||
         changedProperties.has('musicId') ||
         changedProperties.has('isrc') ||
+        changedProperties.has('ttml') ||
         changedProperties.has('songTitle') ||
         changedProperties.has('songArtist') ||
         changedProperties.has('songAlbum') ||

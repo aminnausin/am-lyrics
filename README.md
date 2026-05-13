@@ -47,6 +47,7 @@ Or, just use the CDN.
 | `query`                  | `string`  | `undefined` | Search phrase that resolves metadata via LyricsPlus catalog (falls back to Apple Music search) |
 | `music-id`               | `string`  | `undefined` | Specific Apple Music song ID (served through the backup Apple endpoint)                        |
 | `isrc`                   | `string`  | `undefined` | ISRC code to verify correct song match                                                         |
+| `ttml`                   | `string`  | `undefined` | A string of TTML formatted lyrics to be rendered directly (bypasses all external requests)     |
 | `song-title`             | `string`  | `undefined` | Preferred title for LyricsPlus (primary) provider                                              |
 | `song-artist`            | `string`  | `undefined` | Preferred artist name for LyricsPlus provider                                                  |
 | `song-album`             | `string`  | `undefined` | Optional album name passed to LyricsPlus provider                                              |
