@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.5.1';
+const VERSION = '1.5.2';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -725,6 +725,7 @@ export class AmLyrics extends LitElement {
       background-clip: text;
       -webkit-background-clip: text;
       backface-visibility: hidden;
+      transform-origin: 50% 80%;
       transition:
         color 0.7s,
         background-color 0.7s,
@@ -762,7 +763,6 @@ export class AmLyrics extends LitElement {
       background-position:
         -0.5em 0%,
         -0.25em 0%;
-      transform-origin: 50% 80%;
       transition:
         transform 0.7s ease,
         color 0.18s;
@@ -1954,7 +1954,12 @@ export class AmLyrics extends LitElement {
           collectedSources.push(biniResult);
         }
 
-        if (collectedSources.length === 0) {
+        const hasWordSync = (sources: YouLyPlusLyricsResult[]) =>
+          sources.some(s =>
+            s.lines.some(l => l.isWordSynced || (l.text && l.text.length > 1)),
+          );
+
+        if (collectedSources.length === 0 || !hasWordSync(collectedSources)) {
           const unisonResult = await AmLyrics.fetchLyricsFromUnison(
             resolvedMetadata.metadata,
           );
@@ -1963,7 +1968,7 @@ export class AmLyrics extends LitElement {
           }
         }
 
-        if (collectedSources.length === 0) {
+        if (collectedSources.length === 0 || !hasWordSync(collectedSources)) {
           const youLyResults = await AmLyrics.fetchLyricsFromYouLyPlus(
             title,
             artist,
@@ -1978,7 +1983,13 @@ export class AmLyrics extends LitElement {
         }
       }
 
-      if (collectedSources.length === 0 && resolvedMetadata?.metadata) {
+      const hasLineSync = (sources: YouLyPlusLyricsResult[]) =>
+        sources.some(s => s.lines.some(l => l.timestamp > 0 || l.endtime > 0));
+
+      if (
+        (collectedSources.length === 0 || !hasLineSync(collectedSources)) &&
+        resolvedMetadata?.metadata
+      ) {
         // Fallback: LRCLIB
         const lrclibResult = await AmLyrics.fetchLyricsFromLrclib(
           resolvedMetadata.metadata,
@@ -2149,6 +2160,42 @@ export class AmLyrics extends LitElement {
         const resolvedMetadata = await this.resolveSongMetadata();
         if (resolvedMetadata?.metadata) {
           const newSources: YouLyPlusLyricsResult[] = [];
+
+          // Try Unison if not fetched
+          if (
+            !this.availableSources.some(s =>
+              s.source.toLowerCase().includes('unison'),
+            )
+          ) {
+            const unisonResult = await AmLyrics.fetchLyricsFromUnison(
+              resolvedMetadata.metadata,
+            );
+            if (unisonResult && unisonResult.lines.length > 0) {
+              newSources.push(unisonResult);
+            }
+          }
+
+          // Try YouLyPlus (KPoe) if we don't have Apple or QQ
+          if (
+            !this.availableSources.some(
+              s =>
+                s.source.toLowerCase().includes('apple') ||
+                s.source.toLowerCase().includes('qq'),
+            )
+          ) {
+            const title = resolvedMetadata.metadata.title?.trim() || '';
+            const artist = resolvedMetadata.metadata.artist?.trim() || '';
+            const youLyResults = await AmLyrics.fetchLyricsFromYouLyPlus(
+              title,
+              artist,
+              resolvedMetadata.catalogIsrc,
+              resolvedMetadata.metadata,
+              true,
+            );
+            if (youLyResults && youLyResults.length > 0) {
+              newSources.push(...youLyResults);
+            }
+          }
 
           // Try LRCLIB if not fetched
           if (
@@ -3880,10 +3927,19 @@ export class AmLyrics extends LitElement {
 
     // 1. Compute scroll lookahead based on gap to next line (YouLyPlus style)
     let scrollLookAheadMs = 350;
-    const currentAudioIndex = this.getLineIndexAtTime(
-      this.currentTime,
-      this.lastActiveIndex,
-    );
+    let currentAudioIndex = -1;
+    for (let i = 0; i < this.lyrics.length; i += 1) {
+      if (this.lyrics[i].timestamp > this.currentTime) {
+        currentAudioIndex = i - 1;
+        break;
+      }
+    }
+    if (currentAudioIndex === -1 && this.lyrics.length > 0) {
+      if (this.currentTime >= this.lyrics[this.lyrics.length - 1].timestamp) {
+        currentAudioIndex = this.lyrics.length - 1;
+      }
+    }
+
     if (
       currentAudioIndex !== -1 &&
       currentAudioIndex + 1 < this.lyrics.length
