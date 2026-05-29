@@ -259,17 +259,15 @@ export class AmLyrics extends LitElement {
 
     .background-vocal-container {
       max-height: 0;
-      overflow: visible;
+      overflow: hidden;
       opacity: 0;
       font-size: var(--lyplus-font-size-subtext);
       line-height: 1.15;
       color: color-mix(in srgb, var(--lyplus-text-secondary) 80%, transparent);
-      /* Fast exit (0.25 s) so bg vocals collapse quickly and feel snappy.
-         The scroll takes ~0.4 s; finishing the collapse first prevents
-         the container from trailing behind the motion. */
       transition:
-        max-height 250ms cubic-bezier(0.41, 0, 0.12, 0.99),
-        opacity 250ms cubic-bezier(0.41, 0, 0.12, 0.99);
+        max-height var(--scroll-duration, 400ms)
+          cubic-bezier(0.41, 0, 0.12, 0.99),
+        opacity var(--scroll-duration, 400ms) cubic-bezier(0.41, 0, 0.12, 0.99);
       margin: 0;
       pointer-events: none;
     }
@@ -278,7 +276,8 @@ export class AmLyrics extends LitElement {
       display: block;
       padding-top: 0;
       padding-bottom: 0;
-      transition: padding-top 250ms cubic-bezier(0.41, 0, 0.12, 0.99);
+      transition: padding-top var(--scroll-duration, 400ms)
+        cubic-bezier(0.41, 0, 0.12, 0.99);
     }
 
     .lyrics-line.singer-right .background-vocal-container,
@@ -293,16 +292,11 @@ export class AmLyrics extends LitElement {
     .lyrics-line.bg-expanded .background-vocal-container {
       max-height: 4em;
       opacity: 1;
-      /* Slower entry (0.6 s) so bg vocals expand smoothly. */
-      transition:
-        max-height 0.6s ease,
-        opacity 0.6s ease;
       will-change: max-height, opacity;
     }
 
     .lyrics-line.bg-expanded .background-vocal-wrap {
       padding-top: 0.26em;
-      transition: padding-top 0.6s ease;
     }
 
     /* --- Line States & Modifiers --- */
@@ -4187,18 +4181,7 @@ export class AmLyrics extends LitElement {
         const canAnimateByChar = !isCJK && !isRTL && !hasHyphen && wordLen > 0;
         const isLineSynced =
           line.isWordSynced === false || line.text.some(s => s.lineSynced);
-        const hasCharRiseDuration =
-          combinedDuration >= Math.max(700, wordLen * 85);
-        const hasLongShortWordDuration =
-          wordLen >= 4 && combinedDuration >= Math.max(1300, wordLen * 260);
-        const isCharRiseVW =
-          canAnimateByChar &&
-          !isLineSynced &&
-          ((wordLen >= 8 && hasCharRiseDuration) ||
-            (wordLen < 8 && hasLongShortWordDuration));
-
-        let isGrowableVW =
-          canAnimateByChar && !isCharRiseVW && wordLen > 0 && wordLen <= 7;
+        let isGrowableVW = canAnimateByChar && wordLen > 0 && wordLen <= 7;
         if (isGrowableVW) {
           if (wordLen < 3) {
             isGrowableVW =
@@ -4208,6 +4191,17 @@ export class AmLyrics extends LitElement {
               combinedDuration >= 850 && combinedDuration >= wordLen * 190;
           }
         }
+
+        const hasCharRiseDuration =
+          combinedDuration >= Math.max(700, wordLen * 85);
+        const hasLongShortWordDuration =
+          wordLen >= 4 && combinedDuration >= Math.max(1300, wordLen * 260);
+        const isCharRiseVW =
+          canAnimateByChar &&
+          !isLineSynced &&
+          !isGrowableVW &&
+          ((wordLen >= 8 && hasCharRiseDuration) ||
+            (wordLen < 8 && hasLongShortWordDuration));
 
         const isGlowingVW = isGrowableVW && !isLineSynced;
 
@@ -5342,13 +5336,35 @@ export class AmLyrics extends LitElement {
       syllable.querySelectorAll('span.char'),
     ) as HTMLElement[];
     const wordElement = syllable.parentElement?.parentElement; // syllable-wrap -> word
-    const allWordCharSpans = wordElement
-      ? (Array.from(wordElement.querySelectorAll('span.char')) as HTMLElement[])
-      : [];
+    const virtualWordId = (wordElement as HTMLElement | undefined)?.dataset
+      .virtualWordId;
+    let wordElements: HTMLElement[] = [];
+    if (virtualWordId && wordElement?.parentElement) {
+      wordElements = Array.from(
+        wordElement.parentElement.querySelectorAll('.lyrics-word'),
+      ).filter(
+        el => (el as HTMLElement).dataset.virtualWordId === virtualWordId,
+      ) as HTMLElement[];
+    } else if (wordElement) {
+      wordElements = [wordElement as HTMLElement];
+    }
+    const allWordCharSpans = wordElements.flatMap(
+      word => Array.from(word.querySelectorAll('span.char')) as HTMLElement[],
+    );
     const isGrowable = wordElement?.classList.contains('growable');
     const isCharRise = wordElement?.classList.contains('char-rise');
     const isFirstSyllable =
       syllable.getAttribute('data-syllable-index') === '0';
+    const syllableStartMs = parseFloat(
+      syllable.getAttribute('data-start-time') || '0',
+    );
+    const virtualWordStartMs = parseFloat(
+      (wordElement as HTMLElement | undefined)?.dataset.virtualWordStart || '',
+    );
+    const isFirstInVirtualWord =
+      isFirstSyllable &&
+      (!Number.isFinite(virtualWordStartMs) ||
+        Math.abs(syllableStartMs - virtualWordStartMs) < 0.5);
     const isFirstInContainer = isFirstSyllable; // Simplified
     const isGap = syllable.closest('.lyrics-gap') !== null;
 
@@ -5371,7 +5387,7 @@ export class AmLyrics extends LitElement {
     }> = [];
 
     // Step 1: Grow Pass
-    if (isGrowable && isFirstSyllable && allWordCharSpans.length > 0) {
+    if (isGrowable && isFirstInVirtualWord && allWordCharSpans.length > 0) {
       const finalDuration = wordDurationMs;
       const baseDelayPerChar = finalDuration * 0.09;
       const growDurationMs = finalDuration * 1.5;
@@ -5415,7 +5431,7 @@ export class AmLyrics extends LitElement {
       });
     }
 
-    if (isCharRise && isFirstSyllable && allWordCharSpans.length > 0) {
+    if (isCharRise && isFirstInVirtualWord && allWordCharSpans.length > 0) {
       const finalDuration = Math.max(wordDurationMs, syllableDurationMs);
       const baseDelayPerChar = finalDuration * 0.09;
       const riseDurationMs = finalDuration * 1.5;
@@ -6162,6 +6178,8 @@ export class AmLyrics extends LitElement {
         const vwFullText = lineData?.vwFullText ?? [];
         const vwFullDuration = lineData?.vwFullDuration ?? [];
         const vwCharOffset = lineData?.vwCharOffset ?? [];
+        const vwStartMs = lineData?.vwStartMs ?? [];
+        const vwEndMs = lineData?.vwEndMs ?? [];
         const lineIsRTL = lineData?.lineIsRTL ?? false;
 
         // Create main vocals using YouLyPlus syllable structure
@@ -6183,6 +6201,13 @@ export class AmLyrics extends LitElement {
             const groupCharOffset = isAnimatedByChar
               ? vwCharOffset[groupIdx]
               : 0;
+            const virtualWordId = isAnimatedByChar
+              ? `${lineIndex}:${vwStartMs[groupIdx]}:${vwEndMs[groupIdx]}`
+              : '';
+            const virtualWordStart = isAnimatedByChar
+              ? vwStartMs[groupIdx]
+              : '';
+            const virtualWordEnd = isAnimatedByChar ? vwEndMs[groupIdx] : '';
 
             let sylCharAccumulator = 0;
 
@@ -6209,6 +6234,9 @@ export class AmLyrics extends LitElement {
                 : ''}${isGlowing ? ' glowing' : ''}${shouldAllowBreak
                 ? ' allow-break'
                 : ''}"
+              data-virtual-word-id="${virtualWordId}"
+              data-virtual-word-start="${virtualWordStart}"
+              data-virtual-word-end="${virtualWordEnd}"
               style="--rise-duration: ${riseDuration}s"
               >${group.map((syllable, sylIdx) => {
                 const startTimeMs = syllable.timestamp;
