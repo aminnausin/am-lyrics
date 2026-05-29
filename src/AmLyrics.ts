@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.5.3';
+const VERSION = '1.5.4';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -4184,8 +4184,21 @@ export class AmLyrics extends LitElement {
         const hasHyphen = combinedText.includes('-');
 
         const wordLen = combinedText.length;
+        const canAnimateByChar = !isCJK && !isRTL && !hasHyphen && wordLen > 0;
+        const isLineSynced =
+          line.isWordSynced === false || line.text.some(s => s.lineSynced);
+        const hasCharRiseDuration =
+          combinedDuration >= Math.max(700, wordLen * 85);
+        const hasLongShortWordDuration =
+          wordLen >= 4 && combinedDuration >= Math.max(1300, wordLen * 260);
+        const isCharRiseVW =
+          canAnimateByChar &&
+          !isLineSynced &&
+          ((wordLen >= 8 && hasCharRiseDuration) ||
+            (wordLen < 8 && hasLongShortWordDuration));
+
         let isGrowableVW =
-          !isCJK && !isRTL && !hasHyphen && wordLen > 0 && wordLen <= 7;
+          canAnimateByChar && !isCharRiseVW && wordLen > 0 && wordLen <= 7;
         if (isGrowableVW) {
           if (wordLen < 3) {
             isGrowableVW =
@@ -4196,11 +4209,7 @@ export class AmLyrics extends LitElement {
           }
         }
 
-        const isLineSynced =
-          line.isWordSynced === false || line.text.some(s => s.lineSynced);
         const isGlowingVW = isGrowableVW && !isLineSynced;
-        const isCharRiseVW =
-          !isGrowableVW && !isLineSynced && !isCJK && !isRTL && wordLen >= 8;
 
         let charOff = 0;
         for (let gi = vwStart; gi <= vwEnd; gi += 1) {
@@ -5450,19 +5459,25 @@ export class AmLyrics extends LitElement {
         ) {
           animationParts.push(existingAnimation.split(',')[0].trim());
         }
-        if (charIndex > 0) {
+        if (charIndex > 0 && wipeDelay > 0 && wipeDuration > 0) {
           const arrivalTime =
             (span.dataset.preWipeArrival
               ? parseFloat(span.dataset.preWipeArrival)
               : syllableDurationMs * startPct) - elapsedTimeMs;
-          const constantDuration = parseFloat(
+          const measuredPreWipeDuration = parseFloat(
             span.dataset.preWipeDuration || '100',
           );
-          const animDelay = arrivalTime - constantDuration;
+          const preWipeDuration = Math.min(
+            measuredPreWipeDuration,
+            wipeDuration * 0.9,
+            syllableDurationMs * 0.08,
+            arrivalTime,
+          );
+          const animDelay = arrivalTime - preWipeDuration;
 
-          if (constantDuration > 0) {
+          if (preWipeDuration >= 16) {
             animationParts.push(
-              `pre-wipe-char ${constantDuration}ms linear ${animDelay}ms forwards`,
+              `pre-wipe-char ${preWipeDuration}ms linear ${animDelay}ms none`,
             );
           }
         }
