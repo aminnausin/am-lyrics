@@ -1,6 +1,6 @@
 # \<am-lyrics>
 
-![npm](https://img.shields.io/npm/v/@uimaxbai/am-lyrics.svg) ![npm](https://img.shields.io/npm/dt/@uimaxbai/am-lyrics.svg) [![](https://data.jsdelivr.com/v1/package/npm/@uimaxbai/am-lyrics/badge)](https://www.jsdelivr.com/package/npm/@uimaxbai/am-lyrics)
+[![npm](https://img.shields.io/npm/v/@uimaxbai/am-lyrics.svg)](https://www.npmjs.com/package/@uimaxbai/am-lyrics) [![npm](https://img.shields.io/npm/dt/@uimaxbai/am-lyrics.svg)](https://www.npmjs.com/package/@uimaxbai/am-lyrics) [![](https://data.jsdelivr.com/v1/package/npm/@uimaxbai/am-lyrics/badge)](https://www.jsdelivr.com/package/npm/@uimaxbai/am-lyrics)
 
 ![Running on Monochrome in fullscreen](./demo.webp)
 
