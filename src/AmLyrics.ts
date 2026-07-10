@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.5.5';
+const VERSION = '1.5.6';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -19,7 +19,7 @@ const LONG_WORD_WIPE_EXTRA_EM = 0.45;
 const LONG_WORD_WIPE_EXTRA_RATIO = 0.35;
 const SHORT_WORD_DRAG_MIN_DURATION_MS = 760;
 const SHORT_WORD_GLOW_MIN_DURATION_MS = 1320;
-const WORD_PRE_WIPE_HANDOFF_LEAD_MS = 120;
+const WORD_PRE_WIPE_HANDOFF_LEAD_MS = 100;
 
 /**
  * Fetch with an automatic timeout via AbortSignal.
@@ -318,6 +318,18 @@ export class AmLyrics extends LitElement {
 
     .lyrics-line.pre-active {
       opacity: 1;
+    }
+
+    /* Predictive scrolling begins before the next timestamp. Start dimming
+       the outgoing line at the same moment so it settles with the scroll. */
+    .lyrics-line.scroll-exiting {
+      opacity: 0.8;
+      color: var(--lyplus-text-secondary);
+      transition:
+        opacity var(--scroll-duration, 400ms) cubic-bezier(0.41, 0, 0.12, 0.99),
+        transform var(--scroll-duration, 400ms)
+          cubic-bezier(0.41, 0, 0.12, 0.99) var(--lyrics-line-delay, 0ms),
+        filter var(--scroll-duration, 400ms) ease;
     }
 
     .lyrics-line.persist-highlight {
@@ -750,15 +762,24 @@ export class AmLyrics extends LitElement {
       background-clip: text;
       -webkit-background-clip: text;
       background-repeat: no-repeat;
-      background-image: linear-gradient(
-        90deg,
-        var(--lyplus-text-primary, #fff) 0%,
-        var(--lyplus-text-primary, #fff)
-          calc(100% - var(--wipe-gradient-width, 0.75em)),
-        #0000 100%
-      );
-      background-size: 0% 100%;
-      background-position: left;
+      background-image:
+        linear-gradient(
+          90deg,
+          #ffffff00 0%,
+          var(--lyplus-text-primary, #fff) 50%,
+          #0000 100%
+        ),
+        linear-gradient(
+          90deg,
+          var(--lyplus-text-primary, #fff) 100%,
+          #0000 100%
+        );
+      background-size:
+        var(--wipe-gradient-width, 0.75em) 100%,
+        0% 100%;
+      background-position:
+        calc(-1 * var(--wipe-gradient-width, 0.75em)) 0%,
+        left;
       transition:
         transform 0.7s ease,
         color 0.18s;
@@ -777,20 +798,11 @@ export class AmLyrics extends LitElement {
     }
 
     .lyrics-line.active .lyrics-syllable span.char.pre-wipe-lead {
-      animation-name: pre-wipe-word-char;
+      animation-name: char-pre-wipe;
       animation-duration: var(--pre-wipe-duration);
       animation-delay: var(--pre-wipe-delay);
       animation-timing-function: linear;
       animation-fill-mode: forwards;
-      background-image: linear-gradient(
-        90deg,
-        var(--lyplus-text-primary, #fff) 0%,
-        var(--lyplus-text-primary, #fff)
-          calc(100% - var(--wipe-gradient-width, 0.75em)),
-        #0000 100%
-      );
-      background-size: 0% 100%;
-      background-position: var(--char-wipe-position, left) 0%;
     }
 
     /* ==========================================================================
@@ -1327,30 +1339,63 @@ export class AmLyrics extends LitElement {
       }
     }
 
-    @keyframes pre-wipe-word-char {
+    /* Character-rendered words use a separate moving gradient in front of
+       their solid fill. This makes the individual glyph wipes read as one
+       continuous word-level wipe. */
+    @keyframes char-pre-wipe {
       from {
-        background-size: 0px 100%;
-        background-position: var(--char-wipe-position, left) 0%;
+        background-size:
+          var(--wipe-gradient-width, 0.75em) 100%,
+          0% 100%;
+        background-position:
+          calc(-1 * var(--wipe-gradient-width, 0.75em)) 0%,
+          left;
       }
       to {
-        background-size: var(--pre-wipe-word-size, var(--wipe-gradient-width))
-          100%;
-        background-position: var(--char-wipe-position, left) 0%;
+        background-size:
+          var(--wipe-gradient-width, 0.75em) 100%,
+          0% 100%;
+        background-position:
+          calc(-1 * var(--wipe-gradient-half, 0.375em)) 0%,
+          left;
       }
     }
 
-    @keyframes wipe-word-from-pre {
+    @keyframes char-start-wipe {
       from {
-        background-size: var(--pre-wipe-word-size, var(--wipe-gradient-width))
-          100%;
-        background-position: var(--char-wipe-position, left) 0%;
+        background-size:
+          var(--wipe-gradient-width, 0.75em) 100%,
+          0% 100%;
+        background-position:
+          calc(-1 * var(--wipe-gradient-width, 0.75em)) 0%,
+          left;
       }
       to {
-        background-size: calc(
-            var(--word-wipe-width, 100%) + var(--wipe-gradient-width, 0.75em)
-          )
-          100%;
-        background-position: var(--char-wipe-position, left) 0%;
+        background-size:
+          var(--wipe-gradient-width, 0.75em) 100%,
+          100% 100%;
+        background-position:
+          calc(100% + var(--wipe-gradient-half, 0.375em)) 0%,
+          left;
+      }
+    }
+
+    @keyframes char-wipe {
+      from {
+        background-size:
+          var(--wipe-gradient-width, 0.75em) 100%,
+          0% 100%;
+        background-position:
+          calc(-1 * var(--wipe-gradient-half, 0.375em)) 0%,
+          left;
+      }
+      to {
+        background-size:
+          var(--wipe-gradient-width, 0.75em) 100%,
+          100% 100%;
+        background-position:
+          calc(100% + var(--wipe-gradient-half, 0.375em)) 0%,
+          left;
       }
     }
 
@@ -1703,10 +1748,15 @@ export class AmLyrics extends LitElement {
       // Stop all running animations and clear highlights immediately
       if (this.lyricsContainer) {
         const activeLines = this.lyricsContainer.querySelectorAll(
-          '.lyrics-line.active, .lyrics-line.pre-active, .lyrics-line.bg-expanded',
+          '.lyrics-line.active, .lyrics-line.pre-active, .lyrics-line.bg-expanded, .lyrics-line.scroll-exiting',
         );
         activeLines.forEach(line => {
-          line.classList.remove('active', 'pre-active', 'bg-expanded');
+          line.classList.remove(
+            'active',
+            'pre-active',
+            'bg-expanded',
+            'scroll-exiting',
+          );
           AmLyrics.resetSyllables(line as HTMLElement);
         });
 
@@ -3647,7 +3697,11 @@ export class AmLyrics extends LitElement {
                 AmLyrics.finishSyllablesUpToTime(lineElement, newTime);
               }
 
-              lineElement.classList.remove('active', 'bg-expanded');
+              lineElement.classList.remove(
+                'active',
+                'bg-expanded',
+                'scroll-exiting',
+              );
 
               if (lineElement.classList.contains('pre-active')) {
                 lineElement.classList.remove('pre-active');
@@ -3665,7 +3719,7 @@ export class AmLyrics extends LitElement {
             const lineElement = this._getLineElement(lineIndex);
             if (lineElement) {
               lineElement.classList.add('active');
-              lineElement.classList.remove('pre-active');
+              lineElement.classList.remove('pre-active', 'scroll-exiting');
               const preIdx = this.preActiveLineElements.indexOf(lineElement);
               if (preIdx !== -1) this.preActiveLineElements.splice(preIdx, 1);
             }
@@ -3914,7 +3968,13 @@ export class AmLyrics extends LitElement {
   }
 
   updated(changedProperties: Map<string | number | symbol, unknown>) {
-    if (changedProperties.has('lyrics')) {
+    const lyricsDomBecameRenderable =
+      changedProperties.has('lyrics') ||
+      (changedProperties.has('isLoading') &&
+        !this.isLoading &&
+        Boolean(this.lyrics));
+
+    if (lyricsDomBecameRenderable) {
       this._invalidateCaches();
       this._ensureLineDataCache();
       this._updateCachedIsUnsynced();
@@ -4112,7 +4172,12 @@ export class AmLyrics extends LitElement {
     }
 
     const scrollDuration = scrollLookAheadMs;
-    targetElement.style.setProperty('--scroll-duration', `${scrollDuration}ms`);
+    if (targetElement !== this.currentPrimaryActiveLine || forceScroll) {
+      targetElement.style.setProperty(
+        '--scroll-duration',
+        `${scrollDuration}ms`,
+      );
+    }
     this.setBackgroundExpandedLine(targetElement);
 
     // Unblur the upcoming target line early while the separate bg-expanded
@@ -4383,6 +4448,7 @@ export class AmLyrics extends LitElement {
 
     const computedStyle = getComputedStyle(referenceSyllable);
     const { font } = computedStyle; // Full font string
+    const fontSize = Number.parseFloat(computedStyle.fontSize) || 16;
 
     const charTimedWords = Array.from(
       this.shadowRoot.querySelectorAll(
@@ -4466,6 +4532,15 @@ export class AmLyrics extends LitElement {
         Number.isFinite(virtualWordStart) &&
         Number.isFinite(virtualWordEnd) &&
         virtualWordDuration > 0;
+      const wordVelocityPxPerMs = hasTimedSyllables
+        ? totalWordWidth / virtualWordDuration
+        : 0;
+      const gradientLeadWidthPx =
+        (BASE_WIPE_GRADIENT_EM * Math.max(1, fontSize)) / 2;
+      const measuredPreWipeDuration =
+        wordVelocityPxPerMs > 0
+          ? gradientLeadWidthPx / wordVelocityPxPerMs
+          : 100;
 
       let cumulativeCharWidth = 0;
       syllableEntries.forEach(entry => {
@@ -4504,6 +4579,7 @@ export class AmLyrics extends LitElement {
 
           target.dataset.wipeStart = startPercent.toFixed(4);
           target.dataset.wipeDuration = durationPercent.toFixed(4);
+          target.dataset.preWipeDuration = measuredPreWipeDuration.toFixed(2);
           target.style.setProperty('--word-wipe-width', `${totalWordWidth}px`);
           target.style.setProperty(
             '--char-wipe-position',
@@ -4727,7 +4803,15 @@ export class AmLyrics extends LitElement {
       // effectiveEndTimes).  Lines stay active until their extended end,
       // so we no longer need to remove .active here.
       this.lastPrimaryActiveLine = this.currentPrimaryActiveLine;
+      if (this.lastPrimaryActiveLine) {
+        this.lastPrimaryActiveLine.style.setProperty(
+          '--scroll-duration',
+          `${scrollDuration ?? SCROLL_ANIMATION_DURATION_MS}ms`,
+        );
+        this.lastPrimaryActiveLine.classList.add('scroll-exiting');
+      }
       this.currentPrimaryActiveLine = lineElement;
+      this.currentPrimaryActiveLine.classList.remove('scroll-exiting');
       const lineIndex = AmLyrics.getLineIndexFromElement(lineElement);
       if (lineIndex !== null) {
         this.lastActiveIndex = lineIndex;
@@ -5095,7 +5179,7 @@ export class AmLyrics extends LitElement {
       allLines.forEach(lineEl => {
         AmLyrics.resetSyllables(lineEl as HTMLElement);
         // Remove scroll-animate class and properties to stop any scroll animations
-        lineEl.classList.remove('scroll-animate');
+        lineEl.classList.remove('scroll-animate', 'scroll-exiting');
         (lineEl as HTMLElement).style.removeProperty('--scroll-delta');
         (lineEl as HTMLElement).style.removeProperty('--lyrics-line-delay');
       });
@@ -5379,6 +5463,7 @@ export class AmLyrics extends LitElement {
       scrollDuration ?? SCROLL_ANIMATION_DURATION_MS,
     );
     const delayIncrement = duration * 0.1;
+    const maxStaggerSteps = 4;
     const lookAhead = 20;
     const len = lineArray.length;
 
@@ -5387,13 +5472,17 @@ export class AmLyrics extends LitElement {
 
     let maxAnimationDuration = 0;
     const newAnimatingLines: HTMLElement[] = [];
+    const lineDelays = new Map<HTMLElement, number>();
     const scrollingDown = delta >= 0;
 
     if (scrollingDown) {
       let delayCounter = 0;
       for (let i = start; i < end; i += 1) {
         const line = lineArray[i];
-        const delay = i >= referenceIndex ? delayCounter * delayIncrement : 0;
+        const delay =
+          i >= referenceIndex
+            ? Math.min(delayCounter, maxStaggerSteps) * delayIncrement
+            : 0;
 
         if (i >= referenceIndex && !line.classList.contains('lyrics-gap')) {
           delayCounter += 1;
@@ -5401,11 +5490,11 @@ export class AmLyrics extends LitElement {
 
         line.style.setProperty('--scroll-delta', `${delta}px`);
         line.style.setProperty('--lyrics-line-delay', `${delay}ms`);
-        line.style.setProperty('--scroll-duration', `${duration + 100}ms`);
+        lineDelays.set(line, delay);
 
         newAnimatingLines.push(line);
 
-        const lineDuration = duration + delay;
+        const lineDuration = duration + 100 + delay;
         if (lineDuration > maxAnimationDuration) {
           maxAnimationDuration = lineDuration;
         }
@@ -5414,7 +5503,10 @@ export class AmLyrics extends LitElement {
       let delayCounter = 0;
       for (let i = end - 1; i >= start; i -= 1) {
         const line = lineArray[i];
-        const delay = i <= referenceIndex ? delayCounter * delayIncrement : 0;
+        const delay =
+          i <= referenceIndex
+            ? Math.min(delayCounter, maxStaggerSteps) * delayIncrement
+            : 0;
 
         if (i <= referenceIndex && !line.classList.contains('lyrics-gap')) {
           delayCounter += 1;
@@ -5422,15 +5514,25 @@ export class AmLyrics extends LitElement {
 
         line.style.setProperty('--scroll-delta', `${delta}px`);
         line.style.setProperty('--lyrics-line-delay', `${delay}ms`);
-        line.style.setProperty('--scroll-duration', `${duration + 100}ms`);
+        lineDelays.set(line, delay);
 
         newAnimatingLines.push(line);
 
-        const lineDuration = duration + delay;
+        const lineDuration = duration + 100 + delay;
         if (lineDuration > maxAnimationDuration) {
           maxAnimationDuration = lineDuration;
         }
       }
+    }
+
+    /* Preserve the staggered starts, but make every line settle together.
+       This keeps the selected line from drifting after its neighbours. */
+    for (const line of newAnimatingLines) {
+      const delay = lineDelays.get(line) ?? 0;
+      line.style.setProperty(
+        '--scroll-duration',
+        `${Math.max(100, maxAnimationDuration - delay)}ms`,
+      );
     }
 
     // --- Step 3: Force reflow so the browser sees the class removal ---
@@ -5810,16 +5912,18 @@ export class AmLyrics extends LitElement {
     );
     preWipeSyllable.classList.add('pre-highlight');
 
-    let leadSpans = charSpans;
-    if (leadSpans.length === 0 && leadChar) {
-      leadSpans = [leadChar];
+    // Character-animated words still need a single word-leading gradient.
+    // Giving every glyph this state creates one gradient per character and
+    // makes the whole word enter the pre-wipe continuation simultaneously.
+    if (leadChar) {
+      AmLyrics.applyWipeShape(leadChar, charCount);
+      leadChar.style.setProperty(
+        '--pre-wipe-duration',
+        `${preWipeDurationMs}ms`,
+      );
+      leadChar.style.setProperty('--pre-wipe-delay', `${-elapsedPreWipe}ms`);
+      leadChar.classList.add('pre-wipe-lead');
     }
-    leadSpans.forEach(span => {
-      AmLyrics.applyWipeShape(span, charCount);
-      span.style.setProperty('--pre-wipe-duration', `${preWipeDurationMs}ms`);
-      span.style.setProperty('--pre-wipe-delay', `${-elapsedPreWipe}ms`);
-      span.classList.add('pre-wipe-lead');
-    });
 
     wordElements.forEach(element => {
       const target = element as any;
@@ -6152,22 +6256,18 @@ export class AmLyrics extends LitElement {
           0,
           charWipeDurationMs - charStartMs,
         );
-        let wipeDelay = charStartMs - wordElapsedTimeMs;
-        let wipeDuration = Math.min(
+        const wipeDelay = charStartMs - wordElapsedTimeMs;
+        const wipeDuration = Math.min(
           charWipeDurationMs * durationPct * wipeScale,
           remainingWordWipeMs,
         );
         const useStartAnimation =
           isFirstInContainer && globalCharIndex === 0 && !hadCharPreWipe;
-        let charWipeAnimation = 'wipe';
+        let charWipeAnimation = 'char-wipe';
         if (hadCharPreWipe) {
-          charWipeAnimation = 'wipe-word-from-pre';
-          wipeDelay = -wordElapsedTimeMs;
-          wipeDuration = charWipeDurationMs;
+          charWipeAnimation = 'char-wipe';
         } else if (useStartAnimation) {
-          charWipeAnimation = isRTL ? 'start-wipe-rtl' : 'start-wipe';
-        } else {
-          charWipeAnimation = isRTL ? 'wipe-rtl' : 'wipe';
+          charWipeAnimation = 'char-start-wipe';
         }
 
         const existingAnimation =
@@ -6182,6 +6282,28 @@ export class AmLyrics extends LitElement {
             existingAnimation.includes('drag-char'))
         ) {
           animationParts.push(existingAnimation.split(',')[0].trim());
+        }
+        if (
+          globalCharIndex > 0 &&
+          !hadCharPreWipe &&
+          wipeDelay > 0 &&
+          wipeDuration > 0
+        ) {
+          const measuredDuration = Number.parseFloat(
+            span.dataset.preWipeDuration || '100',
+          );
+          const preWipeDuration = Math.min(
+            measuredDuration,
+            wipeDuration * 0.9,
+            charWipeDurationMs * 0.08,
+            wipeDelay,
+          );
+
+          if (preWipeDuration >= 16) {
+            animationParts.push(
+              `char-pre-wipe ${preWipeDuration}ms linear ${wipeDelay - preWipeDuration}ms none`,
+            );
+          }
         }
         if (wipeDuration > 0) {
           const wipeFillMode = hadCharPreWipe ? 'both' : 'forwards';
