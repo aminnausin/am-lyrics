@@ -8,7 +8,7 @@
 
 This webcomponent follows the [open-wc](https://github.com/open-wc/open-wc) recommendation.
 
-This web component utilises the [lyricsplus](https://github.com/ibratabian17/YouLyPlus) API to fetch lyrics and the animations are heavily inspired by [YouLy+](https://github.com/ibratabian17/YouLyPlus).
+This web component utilises various APIs to fetch lyrics and the animations are inspired by [YouLy+](https://github.com/ibratabian17/YouLyPlus).
 
 ## Installation
 
@@ -311,9 +311,10 @@ See [`demo/index.html`](./demo/index.html) for a functional demo.
 
 ### Dependencies
 
-For some reason, npm breaks when trying to install (or just takes too long for me :(). For a faster installation, use `yarn` or `bun` which are both compatible with `node` and `package.json`.
+For some reason, npm sometimes breaks when trying to install (or just takes too long for me :(). For a faster installation, use `yarn` or `bun` which are both compatible with `node` and `package.json`.
 
 ```bash
+npm i # may take ages
 yarn install
 bun i
 ```
