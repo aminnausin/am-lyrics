@@ -871,7 +871,8 @@ export class AmLyrics extends LitElement {
     /* Line-synced lyrics should fade in instantly/quickly instead of wiping */
     .lyrics-syllable.line-synced {
       background: transparent !important;
-      color: var(--lyplus-text-secondary) !important;
+        color: var(--lyplus-lyrics-palette) !important;
+        opacity:55%;
     }
 
     .lyrics-line.active .lyrics-syllable.line-synced {
