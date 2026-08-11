@@ -271,7 +271,7 @@ export class AmLyrics extends LitElement {
     .background-vocal-container {
       max-height: 0;
       overflow: hidden;
-      opacity: 0;
+       0;
       font-size: var(--lyplus-font-size-subtext);
       line-height: 1.15;
       color: color-mix(in srgb, var(--lyplus-text-secondary) 80%, transparent);
@@ -302,7 +302,7 @@ export class AmLyrics extends LitElement {
        while .active stays to keep text white until the scroll passes. */
     .lyrics-line.bg-expanded .background-vocal-container {
       max-height: 4em;
-      opacity: 1;
+       1;
       will-change: opacity;
     }
 
@@ -312,18 +312,18 @@ export class AmLyrics extends LitElement {
 
     /* --- Line States & Modifiers --- */
     .lyrics-line.active {
-      opacity: 1;
+       1;
       color: var(--lyplus-text-primary);
     }
 
     .lyrics-line.pre-active {
-      opacity: 1;
+       1;
     }
 
     /* Predictive scrolling begins before the next timestamp. Start dimming
        the outgoing line at the same moment so it settles with the scroll. */
     .lyrics-line.scroll-exiting {
-      opacity: 0.8;
+       0.8;
       color: var(--lyplus-text-secondary);
       transition:
         opacity var(--scroll-duration, 400ms) cubic-bezier(0.41, 0, 0.12, 0.99),
@@ -334,7 +334,7 @@ export class AmLyrics extends LitElement {
 
     .lyrics-line.persist-highlight {
       filter: none !important;
-      opacity: 1;
+       1;
     }
 
     .lyrics-line.persist-highlight .lyrics-syllable.finished,
@@ -871,8 +871,8 @@ export class AmLyrics extends LitElement {
     /* Line-synced lyrics should fade in instantly/quickly instead of wiping */
     .lyrics-syllable.line-synced {
       background: transparent !important;
-        color: var(--lyplus-lyrics-palette) !important;
-        opacity:55%;
+      color: var(--lyplus-lyrics-palette) !important;
+      opacity: 55%;
     }
 
     .lyrics-line.active .lyrics-syllable.line-synced {
