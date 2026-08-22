@@ -8,7 +8,7 @@
 
 This webcomponent follows the [open-wc](https://github.com/open-wc/open-wc) recommendation.
 
-This web component utilises various APIs to fetch lyrics and the animations are inspired by [YouLy+](https://github.com/ibratabian17/YouLyPlus).
+This web component is my take on Apple Music's word by word lyrics, utilises various APIs to fetch lyrics and the animations are inspired by [YouLy+](https://github.com/ibratabian17/YouLyPlus), [Apple Music-like Lyrics](https://github.com/amll-dev/applemusic-like-lyrics) and [LyricsBlossom](https://lyricsblossom.theoscarshen.com/)'s Swift reference. It's designed to be faithful while also being lightweight and able to run on all major browsers and many mid-to-high end devices smoothly. Because it's a Web Component, it's also really easy to use!
 
 ## Installation
 
@@ -16,7 +16,7 @@ This web component utilises various APIs to fetch lyrics and the animations are 
 npm install @uimaxbai/am-lyrics # For react users and those crazy enough to not use the CDN
 ```
 
-Or, just use the CDN.
+Or just use the CDN.
 
 ## Usage
 
@@ -112,19 +112,7 @@ The component automatically uses a 28px compact preset below 520px and a 48px
 wide preset from 900px. The compact and wide variables above override those
 responsive values. CSS variables take precedence over the properties above.
 
-## Design references
-
-The responsive typography, selected-line placement, spacing, background-vocal
-scale, instrumental threshold, and lyric motion defaults are derived primarily
-from the supplied Apple Music Swift references. The playback-synchronised
-instrumental breathing sequence and sliding background-vocal treatment also
-take visual inspiration from
-[Apple Music-like Lyrics](https://github.com/amll-dev/applemusic-like-lyrics),
-without adding it as a runtime dependency.
-
-## Lyrics providers
-
-The component now only uses the LyricsPlus (KPoe) API that powers [YouLyPlus](https://github.com/ibratabian17/YouLyPlus).
+## Lyrics matching
 
 1. Provide `song-title` and `song-artist` (plus optional `song-album`/`song-duration`) to request word-synced lyrics from LyricsPlus. A standalone `query` such as `"Bad Habit - Steve Lacy"` also works—the component looks up the metadata through LyricsPlus' `/v1/songlist/search` endpoint.
 2. If LyricsPlus cannot serve lyrics or metadata is missing, the component automatically falls back to the legacy Apple Music endpoint using the best available identifiers (`query`, `music-id`, `isrc`). Requests that rely solely on `music-id` are handled exclusively by this backup service because LyricsPlus does not support Apple IDs.
@@ -356,8 +344,6 @@ See [`demo/index.html`](./demo/index.html) for a functional demo.
 ## Development
 
 ### Dependencies
-
-For some reason, npm sometimes breaks when trying to install (or just takes too long for me :(). For a faster installation, use `yarn` or `bun` which are both compatible with `node` and `package.json`.
 
 ```bash
 npm i # may take ages
