@@ -54,7 +54,7 @@ Or, just use the CDN.
 | `song-duration`          | `number`  | `undefined` | Optional song duration in milliseconds sent to LyricsPlus                                      |
 | `current-time`           | `number`  | `0`         | Current playback time in milliseconds                                                          |
 | `duration`               | `number`  | `undefined` | Playback timer duration in milliseconds. **Set to `-1` to reset/stop playback**                |
-| `highlight-color`        | `string`  | `"#000"`    | Color for highlighted/active lyrics                                                            |
+| `highlight-color`        | `string`  | `"#fff"`    | Color for highlighted/active lyrics                                                            |
 | ~~`hide-source-footer`~~ | `boolean` | `false`     | Hide/show the source attribution footer                                                        |
 | `font-family`            | `string`  | `undefined` | Custom font family for lyrics                                                                  |
 | `autoscroll`             | `boolean` | `true`      | Enable automatic scrolling to active lyrics                                                    |
@@ -71,10 +71,56 @@ am-lyrics {
 
   /* Alternative highlight color (fallback) */
   --highlight-color: #000;
+
+  /* Swift-derived layout and motion defaults */
+  --lyplus-font-size-base: 34px;
+  --am-lyrics-line-height: 1.2;
+  --am-lyrics-line-spacing: 25px;
+  --am-lyrics-background-vocal-spacing: 15px;
+  --am-lyrics-background-vocal-font-size: 0.65em;
+  --am-lyrics-background-vocal-stack-shift: 7.5px;
+  --am-lyrics-background-vocal-max-height: 8em;
+  --am-lyrics-background-vocal-exit-duration: 450ms;
+  --am-lyrics-instrumental-height: 40px;
+  --am-lyrics-instrumental-spacing: 16px;
+  --am-lyrics-instrumental-enter-duration: 400ms;
+  --am-lyrics-instrumental-collapse-duration: 500ms;
+  --am-lyrics-instrumental-exit-duration: 350ms;
+  --am-lyrics-instrumental-exit-scale: 0;
+  --am-lyrics-inactive-scale: 0.98;
+  --am-lyrics-background-vocal-scale: 0.9;
+  --am-lyrics-touch-scale: 0.96;
+  --am-lyrics-highlight-radius: 16px;
+  --am-lyrics-highlight-surface: rgba(255, 255, 255, 0.08);
+  --am-lyrics-progression-feather: 30px;
+  --am-lyrics-glow-radius: 5px;
+  --am-lyrics-character-rise-peak: -1.25px;
+  --am-lyrics-inline-padding: 20px;
+  --lyrics-scroll-padding-top: 12%;
+  --am-lyrics-compact-font-size: 28px;
+  --am-lyrics-compact-background-vocal-font-size: 0.857em;
+  --am-lyrics-compact-line-spacing: 20px;
+  --am-lyrics-compact-selected-position: 18%;
+  --am-lyrics-wide-font-size: 48px;
+  --am-lyrics-wide-background-vocal-font-size: 0.667em;
+  --am-lyrics-wide-line-spacing: 32px;
+  --am-lyrics-wide-selected-position: 20%;
 }
 ```
 
-**Note**: The CSS variables take precedent over the set properties above.
+The component automatically uses a 28px compact preset below 520px and a 48px
+wide preset from 900px. The compact and wide variables above override those
+responsive values. CSS variables take precedence over the properties above.
+
+## Design references
+
+The responsive typography, selected-line placement, spacing, background-vocal
+scale, instrumental threshold, and lyric motion defaults are derived primarily
+from the supplied Apple Music Swift references. The playback-synchronised
+instrumental breathing sequence and sliding background-vocal treatment also
+take visual inspiration from
+[Apple Music-like Lyrics](https://github.com/amll-dev/applemusic-like-lyrics),
+without adding it as a runtime dependency.
 
 ## Lyrics providers
 
