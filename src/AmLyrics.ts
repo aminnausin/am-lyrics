@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.6.0';
+const VERSION = '1.6.1';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -278,17 +278,10 @@ export class AmLyrics extends LitElement {
         transform 0.4s cubic-bezier(0.41, 0, 0.12, 0.99)
           var(--lyrics-line-delay, 0ms),
         filter 0.7s ease;
-      content-visibility: auto;
+      /* Keep line geometry stable in WebKit; content-visibility:auto can
+         change offsetTop as Safari reveals an offscreen lyric. */
       contain: layout style;
       text-rendering: optimizeLegibility;
-    }
-
-    /* content-visibility:auto adds paint containment. Keep virtualization on
-       distant lines, but disable that paint clip while a line is scaling or
-       expanding background vocals beyond its current layout box. */
-    .lyrics-line:is(.active, .pre-active, .bg-expanded, .bg-collapsing) {
-      content-visibility: visible;
-      contain: layout style;
     }
 
     .lyrics-line::before {
@@ -5931,7 +5924,8 @@ export class AmLyrics extends LitElement {
   ): void {
     if (!this.lyricsContainer) return;
     const parent = this.lyricsContainer;
-    const targetTop = Math.max(0, -newTranslateY);
+    const maxScrollTop = Math.max(0, parent.scrollHeight - parent.clientHeight);
+    const targetTop = AmLyrics.clamp(-newTranslateY, 0, maxScrollTop);
 
     if (!this.scrollAnimationState) {
       this.scrollAnimationState = {
@@ -5970,12 +5964,16 @@ export class AmLyrics extends LitElement {
     const { animatingLines } = this;
 
     const appliedTranslateY = -targetTop;
-    const prevOffset = -parent.scrollTop;
+    // Safari can expose negative or beyond-the-end scrollTop values during
+    // elastic overscroll. Never feed those transient values into the visual
+    // line offset, or the whole stack can animate past the viewport edge.
+    const currentTop = AmLyrics.clamp(parent.scrollTop, 0, maxScrollTop);
+    const prevOffset = -currentTop;
     const delta = prevOffset - appliedTranslateY;
     this.currentScrollOffset = appliedTranslateY;
 
     // Skip animation if already at the target position (e.g., first lines at top)
-    if (Math.abs(parent.scrollTop - targetTop) < 1 && Math.abs(delta) < 1) {
+    if (Math.abs(currentTop - targetTop) < 1 && Math.abs(delta) < 1) {
       animState.isAnimating = false;
       animState.pendingUpdate = null;
       return;
@@ -6101,8 +6099,14 @@ export class AmLyrics extends LitElement {
       );
     }
 
-    // --- Step 3: Force reflow so the browser sees the class removal ---
-    // Use offsetHeight which is cheaper than getBoundingClientRect
+    // Commit the real scroll position before starting the visual FLIP. Unlike
+    // scrollTo({ behavior: 'instant' }), assigning scrollTop is synchronous in
+    // WebKit, so Safari cannot paint an intermediate frame above the viewport.
+    parent.scrollTop = targetTop;
+
+    // --- Step 3: Force reflow so the browser sees the class removal and the
+    // synchronous scroll position before the animation begins. ---
+    // Use offsetHeight which is cheaper than getBoundingClientRect.
     // eslint-disable-next-line no-void
     void parent.offsetHeight;
 
@@ -6137,8 +6141,6 @@ export class AmLyrics extends LitElement {
       animatingLines.length = 0;
       this.scrollAnimationTimeout = undefined;
     }, maxAnimationDuration + 50);
-
-    parent.scrollTo({ top: targetTop, behavior: 'instant' });
   }
 
   /**
