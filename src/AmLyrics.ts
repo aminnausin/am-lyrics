@@ -1265,7 +1265,7 @@ export class AmLyrics extends LitElement {
       position: absolute;
       z-index: 2;
       inset: 10px var(--am-lyrics-inline-padding) auto;
-      height: 40px;
+      height: 30px;
       padding: 0;
       margin: 0;
       gap: 10px;
@@ -1275,8 +1275,8 @@ export class AmLyrics extends LitElement {
 
     .lyrics-header .download-button {
       position: relative;
-      width: 40px;
-      height: 40px;
+      width: 30px;
+      height: 30px;
       justify-content: center;
       background: transparent;
       border: none;
@@ -1322,13 +1322,14 @@ export class AmLyrics extends LitElement {
 
     .header-controls {
       display: flex;
-      gap: 8px;
+      gap: 12px;
     }
 
     .download-controls {
       display: flex;
-      align-items: center;
+      align-items: start;
       gap: 4px;
+      height: 100%;
     }
 
     .source-switch-btn {
@@ -1337,7 +1338,7 @@ export class AmLyrics extends LitElement {
       align-items: center;
       padding: 0 12px;
       border: 0;
-      min-height: 40px;
+      min-height: 30px;
       background: rgba(255, 255, 255, 0.06);
       border-radius: 12px;
       color: #aaa;
@@ -1395,7 +1396,7 @@ export class AmLyrics extends LitElement {
     }
 
     .format-select {
-      min-height: 40px;
+      min-height: 30px;
       background: rgba(255, 255, 255, 0.06);
       border: 1px solid rgba(255, 255, 255, 0.3);
       border-radius: 12px;
@@ -8204,7 +8205,7 @@ export class AmLyrics extends LitElement {
                     <b style="font-weight: 750;">am-lyrics</b> v${VERSION} •
 
                     <a
-                      href="https://github.com/uimaxbai/apple-music-web-components"
+                      href="https://github.com/aminnausin/apple-music-web-components"
                       target="_blank"
                       rel="noopener noreferrer"
                       style="display: inline-flex; align-items: center; gap: 4px;"
