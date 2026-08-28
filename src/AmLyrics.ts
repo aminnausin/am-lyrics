@@ -2455,7 +2455,10 @@ export class AmLyrics extends LitElement {
         sources.some(s => s.lines.some(l => l.timestamp > 0 || l.endtime > 0));
 
       // First fallback to provided lrc (after searching for ttml)
-      if (this.lrc) {
+      if (
+        (collectedSources.length === 0 || !hasLineSync(collectedSources)) &&
+        this.lrc
+      ) {
         const parseResult = AmLyrics.parseLrcSubtitles(this.lrc);
         if (parseResult.length > 0) {
           this.lyrics = parseResult;
