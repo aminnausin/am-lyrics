@@ -34,6 +34,7 @@
       />
       <input id="duration-input" type="number" placeholder="Duration (ms)" />
       <button id="load-button">Load lyrics</button>
+      <button id="load-lrc">Force Lrc</button>
     </div>
 
     <am-lyrics
@@ -61,6 +62,7 @@
       let animationFrameId;
       let songStartTime = 0;
       let systemStartTime = 0;
+      let lrc = '';
 
       function stopAnimation() {
         if (animationFrameId) {
@@ -108,6 +110,11 @@
         const durationText = durationInput?.value.trim() ?? '';
         const durationMs = durationText ? Number(durationText) : NaN;
 
+        if (lrc) {
+          amLyrics.lrc = '';
+          lrc = '';
+        }
+
         if (titleInput) {
           amLyrics.songTitle = title;
         }
@@ -146,6 +153,18 @@
         songStartTime = 0;
       }
 
+      function toggleDemoLrcs() {
+        const amLyrics = document.querySelector('am-lyrics');
+        if (!amLyrics) return;
+
+        const demoLrc = `[00:18.82] Don't go away
+[00:20.78] 逃げ場はない`;
+
+        lrc = lrc ? '' : demoLrc;
+        amLyrics.lrc = lrc;
+        if (!lrc) handleLoadMetadata();
+      }
+
       document.addEventListener('DOMContentLoaded', () => {
         const amLyrics = document.querySelector('am-lyrics');
         const loadButton = document.querySelector('#load-button');
@@ -155,6 +174,7 @@
         const artistInput = document.querySelector('#artist-input');
         const queryInput = document.querySelector('#query-input');
         const durationInput = document.querySelector('#duration-input');
+        const loadLrcButton = document.querySelector('#load-lrc');
 
         if (amLyrics) {
           amLyrics.addEventListener('line-click', handleLineClick);
@@ -186,6 +206,10 @@
 
         if (resetButton) {
           resetButton.addEventListener('click', resetPlayback);
+        }
+
+        if (loadLrcButton) {
+          loadLrcButton.addEventListener('click', toggleDemoLrcs);
         }
       });
     </script>

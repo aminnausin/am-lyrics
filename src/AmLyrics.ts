@@ -1948,6 +1948,9 @@ export class AmLyrics extends LitElement {
   @property({ type: String })
   ttml?: string;
 
+  @property({ type: String })
+  lrc?: string;
+
   @property({ type: String, attribute: 'song-title' })
   songTitle?: string;
 
@@ -2449,6 +2452,27 @@ export class AmLyrics extends LitElement {
 
       const hasLineSync = (sources: YouLyPlusLyricsResult[]) =>
         sources.some(s => s.lines.some(l => l.timestamp > 0 || l.endtime > 0));
+
+      // First fallback to provided lrc (after searching for ttml)
+      if (this.lrc) {
+        const parseResult = AmLyrics.parseLrcSubtitles(this.lrc);
+        if (parseResult.length > 0) {
+          this.lyrics = parseResult;
+          this.lyricsSource = 'Local';
+          this.availableSources = [
+            {
+              lines: this.lyrics,
+              source: 'Local',
+              songwriters: '',
+            },
+          ];
+          this.currentSourceIndex = 0;
+          this.hasFetchedAllProviders = true;
+          this._updateFooter();
+          await this.onLyricsLoaded();
+          return;
+        }
+      }
 
       if (
         (collectedSources.length === 0 || !hasLineSync(collectedSources)) &&
@@ -4403,6 +4427,7 @@ export class AmLyrics extends LitElement {
         changedProperties.has('musicId') ||
         changedProperties.has('isrc') ||
         changedProperties.has('ttml') ||
+        changedProperties.has('lrc') ||
         changedProperties.has('songTitle') ||
         changedProperties.has('songArtist') ||
         changedProperties.has('songAlbum') ||
