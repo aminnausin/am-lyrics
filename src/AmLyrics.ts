@@ -8210,7 +8210,7 @@ export class AmLyrics extends LitElement {
                     <b style="font-weight: 750;">am-lyrics</b> v${VERSION} •
 
                     <a
-                      href="https://github.com/aminnausin/apple-music-web-components"
+                      href="https://github.com/aminnausin/am-lyrics"
                       target="_blank"
                       rel="noopener noreferrer"
                       style="display: inline-flex; align-items: center; gap: 4px;"
