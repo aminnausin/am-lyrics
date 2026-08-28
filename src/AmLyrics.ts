@@ -2490,6 +2490,7 @@ export class AmLyrics extends LitElement {
           collectedSources.push({
             lines: lrclibResult.lines,
             source: 'LRCLIB',
+            songwriters: '',
           });
         }
       }
@@ -2506,6 +2507,7 @@ export class AmLyrics extends LitElement {
           collectedSources.push({
             lines: geniusResult.lines,
             source: 'Genius',
+            songwriters: '',
           });
         }
       }
