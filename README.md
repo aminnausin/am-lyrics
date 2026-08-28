@@ -1,12 +1,12 @@
 # \<am-lyrics>
 
-[![npm](https://img.shields.io/npm/v/@uimaxbai/am-lyrics.svg)](https://www.npmjs.com/package/@uimaxbai/am-lyrics) [![npm](https://img.shields.io/npm/dt/@uimaxbai/am-lyrics.svg)](https://www.npmjs.com/package/@uimaxbai/am-lyrics) [![](https://data.jsdelivr.com/v1/package/npm/@uimaxbai/am-lyrics/badge)](https://www.jsdelivr.com/package/npm/@uimaxbai/am-lyrics)
+[![npm](https://img.shields.io/npm/v/@aminnausin/am-lyrics.svg)](https://www.npmjs.com/package/@aminnausin/am-lyrics) [![npm](https://img.shields.io/npm/dt/@aminnausin/am-lyrics.svg)](https://www.npmjs.com/package/@aminnausin/am-lyrics) [![](https://data.jsdelivr.com/v1/package/npm/@aminnausin/am-lyrics/badge)](https://www.jsdelivr.com/package/npm/@aminnausin/am-lyrics)
 
 This project is a modified fork of binimum/am-lyrics by uimaxbai.
 
-![Running on Monochrome in fullscreen](./demo.webp)
+![Running on MediaServer in fullscreen](./demo.png)
 
-<p align="center">Running on <a href="https://monochrome.tf">Monochrome</a> in fullscreen.</p>
+<p align="center">Running on <a href="https://github.com/aminnausin/mediaserver">MediaServer</a> in fullscreen.</p>
 
 This webcomponent follows the [open-wc](https://github.com/open-wc/open-wc) recommendation.
 
@@ -15,18 +15,12 @@ This web component is my take on Apple Music's word by word lyrics, utilises var
 ## Installation
 
 ```bash
-npm install @uimaxbai/am-lyrics # For react users and those crazy enough to not use the CDN
+npm install @aminnausin/am-lyrics
 ```
-
-Or just use the CDN.
 
 ## Usage
 
 ```html
-<script type="module">
-  import 'https://cdn.jsdelivr.net/npm/@uimaxbai/am-lyrics/dist/src/am-lyrics.min.js';
-</script>
-
 <am-lyrics
   song-title="Uptown Funk"
   song-artist="Mark Ronson"
@@ -50,6 +44,7 @@ Or just use the CDN.
 | `music-id`               | `string`  | `undefined` | Specific Apple Music song ID (served through the backup Apple endpoint)                        |
 | `isrc`                   | `string`  | `undefined` | ISRC code to verify correct song match                                                         |
 | `ttml`                   | `string`  | `undefined` | A string of TTML formatted lyrics to be rendered directly (bypasses all external requests)     |
+| `lrc`                   | `string`  | `undefined` | A string of LRC formatted lyrics to be rendered directly (Is used as the default fallback if ttml fails)     |
 | `song-title`             | `string`  | `undefined` | Preferred title for LyricsPlus (primary) provider                                              |
 | `song-artist`            | `string`  | `undefined` | Preferred artist name for LyricsPlus provider                                                  |
 | `song-album`             | `string`  | `undefined` | Optional album name passed to LyricsPlus provider                                              |
@@ -61,6 +56,7 @@ Or just use the CDN.
 | `font-family`            | `string`  | `undefined` | Custom font family for lyrics                                                                  |
 | `autoscroll`             | `boolean` | `true`      | Enable automatic scrolling to active lyrics                                                    |
 | `interpolate`            | `boolean` | `true`      | Enable smooth word-by-word highlighting animation                                              |
+| `allowed-sources`        | `string`  | `undefined` | Comma-separated list of optional lyric sources to query: `bini`, `unison`, `lyplus`, and `genius`. LRCLIB is always used as the final fallback and is not affected. |
 
 ## CSS Custom Properties (CSS Variables)
 
@@ -116,10 +112,11 @@ responsive values. CSS variables take precedence over the properties above.
 
 ## Lyrics matching
 
-1. Provide `song-title` and `song-artist` (plus optional `song-album`/`song-duration`) to request word-synced lyrics from LyricsPlus. A standalone `query` such as `"Bad Habit - Steve Lacy"` also works—the component looks up the metadata through LyricsPlus' `/v1/songlist/search` endpoint.
-2. If LyricsPlus cannot serve lyrics or metadata is missing, the component automatically falls back to the legacy Apple Music endpoint using the best available identifiers (`query`, `music-id`, `isrc`). Requests that rely solely on `music-id` are handled exclusively by this backup service because LyricsPlus does not support Apple IDs.
+1. Provide `song-title` and `song-artist` (plus optional `song-album` / `song-duration`) to help identify the requested song. A standalone `query` can also be used as a search phrase.
+2. The component queries the lyric sources enabled through `allowed-sources`. If none of the selected sources return lyrics, it automatically falls back to LRCLIB.
+3. The footer shows the active lyric provider so you can see which source supplied the lyrics.
 
-The footer shows the active provider (e.g. “LyricsPlus (KPoe)” or “Apple Music”) so you always know which service responded. Supplying both metadata _and_ a `query` gives the best results because the query remains available for the Apple Music backup.
+Providing as much song metadata as possible generally improves matching accuracy. If you already have the lyrics, you can bypass external lyric requests entirely by supplying `ttml` or `lrc` directly.
 
 ## Events
 
@@ -147,7 +144,7 @@ Then, you can import the `AmLyrics` component from `am-lyrics/react` and use it 
 'use client'; // VERY IMPORTANT!!!
 
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { AmLyrics } from '@uimaxbai/am-lyrics/react';
+import { AmLyrics } from '@aminnausin/am-lyrics/react';
 
 export default function App() {
   const [currentTime, setCurrentTime] = useState(0);
