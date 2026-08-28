@@ -27,8 +27,7 @@
     "build": "rimraf dist && rollup -c rollup.config.js && rm ./dist/tsconfig.tsbuildinfo",
     "prepublishOnly": "npm run analyze -- --exclude dist && npm run build",
     "lint": "eslint --ext .ts,.html . --ignore-path .gitignore && prettier \"**/*.ts\" --check --ignore-path .gitignore",
-    "format": "eslint --ext .ts,.html . --fix --ignore-path .gitignore && prettier \"**/*.ts\" --write --ignore-path .gitignore",
-    "prepare": "npm run build"
+    "format": "eslint --ext .ts,.html . --fix --ignore-path .gitignore && prettier \"**/*.ts\" --write --ignore-path .gitignore"
   },
   "dependencies": {
     "@babel/runtime": "^7.27.6",
