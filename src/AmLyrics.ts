@@ -46,7 +46,7 @@ function fetchWithTimeout(
   );
 }
 
-const KPOE_SERVERS = [
+const KPOE_SERVERS: string[] = [
   'https://lyricsplus.binimum.org',
   'https://lyricsplus-seven.vercel.app',
   'https://lyricsplus.prjktla.workers.dev',
@@ -1978,6 +1978,9 @@ export class AmLyrics extends LitElement {
   @property({ type: Boolean })
   interpolate = true;
 
+  @property({ type: String, attribute: 'allowed-sources' })
+  allowedSources = '';
+
   @state()
   private showRomanization = false;
 
@@ -2391,19 +2394,22 @@ export class AmLyrics extends LitElement {
         !this.isrc;
 
       const collectedSources: YouLyPlusLyricsResult[] = [];
+      const parsedAllowedSources = this.allowedSources.toLowerCase();
 
       if (resolvedMetadata?.metadata && !isMusicIdOnlyRequest) {
         const title = resolvedMetadata.metadata.title?.trim() || '';
         const artist = resolvedMetadata.metadata.artist?.trim() || '';
 
-        const biniResult = await AmLyrics.fetchLyricsFromBiniLyrics(
-          title,
-          artist,
-          resolvedMetadata.catalogIsrc,
-          resolvedMetadata.metadata,
-        );
-        if (biniResult && biniResult.lines.length > 0) {
-          collectedSources.push(biniResult);
+        if (parsedAllowedSources.includes('bini')) {
+          const biniResult = await AmLyrics.fetchLyricsFromBiniLyrics(
+            title,
+            artist,
+            resolvedMetadata.catalogIsrc,
+            resolvedMetadata.metadata,
+          );
+          if (biniResult && biniResult.lines.length > 0) {
+            collectedSources.push(biniResult);
+          }
         }
 
         const hasWordSync = (sources: YouLyPlusLyricsResult[]) =>
@@ -2411,7 +2417,10 @@ export class AmLyrics extends LitElement {
             s.lines.some(l => l.isWordSynced || (l.text && l.text.length > 1)),
           );
 
-        if (collectedSources.length === 0 || !hasWordSync(collectedSources)) {
+        if (
+          (collectedSources.length === 0 || !hasWordSync(collectedSources)) &&
+          parsedAllowedSources.includes('unison')
+        ) {
           const unisonResult = await AmLyrics.fetchLyricsFromUnison(
             resolvedMetadata.metadata,
           );
@@ -2420,7 +2429,10 @@ export class AmLyrics extends LitElement {
           }
         }
 
-        if (collectedSources.length === 0 || !hasWordSync(collectedSources)) {
+        if (
+          (collectedSources.length === 0 || !hasWordSync(collectedSources)) &&
+          parsedAllowedSources.includes('youly')
+        ) {
           const youLyResults = await AmLyrics.fetchLyricsFromYouLyPlus(
             title,
             artist,
@@ -2454,7 +2466,11 @@ export class AmLyrics extends LitElement {
         }
       }
 
-      if (collectedSources.length === 0 && resolvedMetadata?.metadata) {
+      if (
+        collectedSources.length === 0 &&
+        resolvedMetadata?.metadata &&
+        parsedAllowedSources.includes('genius')
+      ) {
         const geniusResult = await AmLyrics.fetchLyricsFromGenius(
           resolvedMetadata.metadata,
         );
