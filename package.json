@@ -1,9 +1,9 @@
 {
-  "name": "@uimaxbai/am-lyrics",
+  "name": "@aminnausin/am-lyrics",
   "description": "Web Component for Apple Music lyrics. Follows open-wc recommendations.",
   "license": "MPL-2.0",
-  "author": "uimaxbai",
-  "version": "1.6.1",
+  "author": "aminnausin",
+  "version": "1.0.0",
   "type": "module",
   "main": "dist/src/index.js",
   "module": "dist/src/index.js",
@@ -16,14 +16,19 @@
     "./am-lyrics.js": "./dist/src/am-lyrics.js",
     "./react": "./dist/src/react.js"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "analyze": "cem analyze --litelement",
     "start": "concurrently -k -r \"rollup -c --watch\" \"web-dev-server\"",
-    "build": "echo 'Change the version in both files!!!' && rimraf dist && rollup -c rollup.config.js",
-    "prepublish": "npm run analyze -- --exclude dist",
+    "build": "rimraf dist && rollup -c rollup.config.js && rm ./dist/tsconfig.tsbuildinfo",
+    "prepublishOnly": "npm run analyze -- --exclude dist && npm run build",
     "lint": "eslint --ext .ts,.html . --ignore-path .gitignore && prettier \"**/*.ts\" --check --ignore-path .gitignore",
     "format": "eslint --ext .ts,.html . --fix --ignore-path .gitignore && prettier \"**/*.ts\" --write --ignore-path .gitignore",
-    "prepare": "npm run build && husky"
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@babel/runtime": "^7.27.6",

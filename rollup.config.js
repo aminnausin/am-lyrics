@@ -31,16 +31,16 @@ export default [
     plugins: commonPlugins,
   },
   // Build for React
-  // {
-  //   input: `${PACKAGE_ROOT_PATH}/src/react.ts`,
-  //   external: [/@babel\/runtime/, 'react', '@lit/react'],
-  //   output: [
-  //     {
-  //       file: 'dist/src/react.js',
-  //       format: 'esm',
-  //       sourcemap: true,
-  //     }
-  //   ],
-  //   plugins: commonPlugins
-  // }
+  {
+    input: `${PACKAGE_ROOT_PATH}/src/react.ts`,
+    external: [/@babel\/runtime/, 'react', '@lit/react'],
+    output: [
+      {
+        file: 'dist/src/react.js',
+        format: 'esm',
+        sourcemap: true,
+      },
+    ],
+    plugins: commonPlugins,
+  },
 ];
