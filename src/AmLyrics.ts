@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.6.2';
+const VERSION = '1.6.3';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -27,6 +27,9 @@ const LONG_WORD_WIPE_EXTRA_EM = 0.45;
 const LONG_WORD_WIPE_EXTRA_RATIO = 0.35;
 const SHORT_WORD_DRAG_MIN_DURATION_MS = 760;
 const SHORT_WORD_GLOW_MIN_DURATION_MS = 1360;
+const WORD_PRE_WIPE_HANDOFF_LEAD_MS = 100;
+const NEXT_LINE_BASE_BLUR_EM = 0.02;
+const NEXT_LINE_UNBLUR_DURATION_MS = 2000;
 
 /**
  * Fetch with an automatic timeout via AbortSignal.
@@ -473,6 +476,10 @@ export class AmLyrics extends LitElement {
 
     .lyrics-line.pre-active {
       opacity: 1;
+      transition:
+        opacity 0.7s ease,
+        transform 0.4s cubic-bezier(0.41, 0, 0.12, 0.99)
+          var(--lyrics-line-delay, 0ms);
     }
 
     /* Predictive scrolling begins before the next timestamp. Start dimming
@@ -617,22 +624,24 @@ export class AmLyrics extends LitElement {
     }
 
     .lyrics-container.blur-inactive-enabled:not(.not-focused)
-      .lyrics-line.next-active-line:not(.active):not(.pre-active) {
-      filter: blur(0.008em);
-    }
-
-    .lyrics-container.blur-inactive-enabled:not(.not-focused)
-      .lyrics-line.next-2:not(.active):not(.pre-active) {
+      .lyrics-line.next-active-line:not(.lyrics-gap):not(.active):not(
+        .pre-active
+      ) {
       filter: blur(0.028em);
     }
 
     .lyrics-container.blur-inactive-enabled:not(.not-focused)
-      .lyrics-line.next-3:not(.active):not(.pre-active) {
+      .lyrics-line.next-2:not(.lyrics-gap):not(.active):not(.pre-active) {
+      filter: blur(0.028em);
+    }
+
+    .lyrics-container.blur-inactive-enabled:not(.not-focused)
+      .lyrics-line.next-3:not(.lyrics-gap):not(.active):not(.pre-active) {
       filter: blur(0.05em);
     }
 
     .lyrics-container.blur-inactive-enabled:not(.not-focused)
-      .lyrics-line.next-4:not(.active):not(.pre-active) {
+      .lyrics-line.next-4:not(.lyrics-gap):not(.active):not(.pre-active) {
       filter: blur(var(--lyplus-blur-amount));
     }
 
@@ -643,10 +652,18 @@ export class AmLyrics extends LitElement {
       opacity: 0.8 !important;
     }
 
-    /* Unblur early for pre-active lines */
+    /* Keep the same playback-driven blur as the upcoming line enters focus. */
     .lyrics-container.blur-inactive-enabled .lyrics-line.pre-active {
-      filter: blur(0px) !important;
+      filter: none !important;
       opacity: 1;
+    }
+
+    .lyrics-line.progressive-unblur {
+      transition:
+        opacity 0.7s ease,
+        transform 0.4s cubic-bezier(0.41, 0, 0.12, 0.99)
+          var(--lyrics-line-delay, 0ms),
+        filter 0ms linear;
     }
 
     /* ==========================================================================
@@ -2094,7 +2111,9 @@ export class AmLyrics extends LitElement {
             'pre-active',
             'bg-expanded',
             'scroll-exiting',
+            'progressive-unblur',
           );
+          (line as HTMLElement).style.removeProperty('filter');
           AmLyrics.resetSyllables(line as HTMLElement);
         });
 
@@ -2281,6 +2300,8 @@ export class AmLyrics extends LitElement {
 
   // Cached element tracking to avoid repeated querySelectorAll calls
   private preActiveLineElements: HTMLElement[] = [];
+
+  private progressiveBlurLine: HTMLElement | null = null;
 
   private positionedLineElements: HTMLElement[] = [];
 
@@ -4150,11 +4171,13 @@ export class AmLyrics extends LitElement {
               }
 
               lineElement.classList.remove('active', 'scroll-exiting');
+              lineElement.classList.remove('progressive-unblur');
               lineElement.removeAttribute('aria-current');
 
               if (lineElement.classList.contains('pre-active')) {
                 lineElement.classList.remove('pre-active');
               }
+              lineElement.style.removeProperty('filter');
               const preIdx = this.preActiveLineElements.indexOf(lineElement);
               if (preIdx !== -1) this.preActiveLineElements.splice(preIdx, 1);
             }
@@ -4170,6 +4193,8 @@ export class AmLyrics extends LitElement {
               lineElement.classList.add('active');
               lineElement.setAttribute('aria-current', 'true');
               lineElement.classList.remove('pre-active', 'scroll-exiting');
+              lineElement.classList.remove('progressive-unblur');
+              lineElement.style.removeProperty('filter');
               const preIdx = this.preActiveLineElements.indexOf(lineElement);
               if (preIdx !== -1) this.preActiveLineElements.splice(preIdx, 1);
             }
@@ -4186,6 +4211,8 @@ export class AmLyrics extends LitElement {
               lineElement !== this.currentPrimaryActiveLine)
           ) {
             lineElement.classList.remove('pre-active');
+            lineElement.classList.remove('progressive-unblur');
+            lineElement.style.removeProperty('filter');
           }
         }
         this.preActiveLineElements = this.preActiveLineElements.filter(el =>
@@ -4274,6 +4301,8 @@ export class AmLyrics extends LitElement {
             : null;
           if (lastLine) {
             lastLine.classList.remove('pre-active');
+            lastLine.classList.remove('progressive-unblur');
+            lastLine.style.removeProperty('filter');
             const preIdx = this.preActiveLineElements.indexOf(lastLine);
             if (preIdx !== -1) this.preActiveLineElements.splice(preIdx, 1);
           }
@@ -4470,27 +4499,62 @@ export class AmLyrics extends LitElement {
       scrollLookAheadMs = Math.min(500, Math.max(350, gap));
     }
 
+    // Blur follows playback time, independently of predictive scrolling.
+    const nextLineIndex = currentAudioIndex + 1;
+    const nextLineElement =
+      nextLineIndex >= 0 && nextLineIndex < this.lyrics.length
+        ? this._getLineElement(nextLineIndex)
+        : null;
+    if (
+      nextLineElement &&
+      !this.isUserScrolling &&
+      this.lyricsContainer.classList.contains('blur-inactive-enabled') &&
+      !this.lyricsContainer.classList.contains('not-focused') &&
+      !nextLineElement.classList.contains('active') &&
+      !nextLineElement.classList.contains('lyrics-gap')
+    ) {
+      if (this.progressiveBlurLine !== nextLineElement) {
+        this.clearProgressiveBlurLine();
+        this.progressiveBlurLine = nextLineElement;
+      }
+      const remainingTime = Math.max(
+        0,
+        this.lyrics[nextLineIndex].timestamp - this.currentTime,
+      );
+      const blurEm =
+        NEXT_LINE_BASE_BLUR_EM *
+        AmLyrics.clamp(remainingTime / NEXT_LINE_UNBLUR_DURATION_MS, 0, 1);
+      const blurValue = `blur(${blurEm.toFixed(4)}em)`;
+      if (nextLineElement.style.filter !== blurValue) {
+        nextLineElement.classList.add('progressive-unblur');
+        nextLineElement.style.setProperty('filter', blurValue, 'important');
+      }
+    } else {
+      this.clearProgressiveBlurLine();
+    }
+
     // 2. Find scroll target at predictive time
     const predictiveTime = this.currentTime + scrollLookAheadMs;
     const predictiveActiveIndices = this.findActiveLineIndices(predictiveTime);
 
     let targetElement: HTMLElement | null = null;
+    let targetLineIndex: number | null = null;
 
     if (predictiveActiveIndices.length > 0) {
-      const targetLineIdx = this.getPrimaryScrollLineIndex(
+      targetLineIndex = this.getPrimaryScrollLineIndex(
         predictiveActiveIndices,
         predictiveTime,
       );
-      if (targetLineIdx !== null && targetLineIdx !== -1) {
-        targetElement = this._getLineElement(targetLineIdx);
+      if (targetLineIndex !== null && targetLineIndex !== -1) {
+        targetElement = this._getLineElement(targetLineIndex);
       }
     }
 
     if (!targetElement) {
       // Fallback: closest line before predictiveTime
-      const targetLineIdx = this.getLineIndexAtTime(predictiveTime, 0);
-      if (targetLineIdx !== null && targetLineIdx !== -1) {
-        targetElement = this._getLineElement(targetLineIdx);
+      targetLineIndex = this.getLineIndexAtTime(predictiveTime, 0);
+      if (targetLineIndex !== null && targetLineIndex !== -1) {
+        targetElement = this._getLineElement(targetLineIndex);
       }
     }
     if (!targetElement) {
@@ -4575,20 +4639,11 @@ export class AmLyrics extends LitElement {
     }
 
     this.lyricsContainer
-      .querySelectorAll<HTMLElement>(
-        '.main-vocal-container, .background-vocal-container',
-      )
-      .forEach(vocalTrack => {
-        const target = vocalTrack as any;
-        target._cachedTimedSyllables = undefined;
-      });
-    this.lyricsContainer
       .querySelectorAll<HTMLElement>('.lyrics-word')
       .forEach(wordElement => {
         const target = wordElement as any;
         target._cachedVirtualWordElements = undefined;
         target._cachedVirtualWordCharSpans = undefined;
-        target._cachedWipeHandoffEndTime = undefined;
         target._wordPreWipeKey = undefined;
         target._wordWipeStarted = false;
       });
@@ -4630,6 +4685,7 @@ export class AmLyrics extends LitElement {
   }
 
   private _invalidateCaches() {
+    this.clearProgressiveBlurLine();
     this.cachedAllGaps = [];
     this.cachedIsUnsynced = false;
     this.cachedLineData = null;
@@ -5187,9 +5243,18 @@ export class AmLyrics extends LitElement {
         keptLines.push(lineElement);
       } else {
         lineElement.classList.remove('pre-active');
+        lineElement.classList.remove('progressive-unblur');
+        lineElement.style.removeProperty('filter');
       }
     }
     this.preActiveLineElements = keptLines;
+  }
+
+  private clearProgressiveBlurLine(): void {
+    if (!this.progressiveBlurLine) return;
+    this.progressiveBlurLine.classList.remove('progressive-unblur');
+    this.progressiveBlurLine.style.removeProperty('filter');
+    this.progressiveBlurLine = null;
   }
 
   private setBackgroundExpandedLine(lineElement: HTMLElement | null): void {
@@ -5452,6 +5517,7 @@ export class AmLyrics extends LitElement {
     this.isUserScrolling = value;
     if (value) {
       this.lyricsContainer?.classList.add('user-scrolling');
+      this.clearProgressiveBlurLine();
     } else {
       this.lyricsContainer?.classList.remove('user-scrolling');
     }
@@ -6653,82 +6719,6 @@ export class AmLyrics extends LitElement {
     );
   }
 
-  private static getWipeHandoffEndTime(syllable: HTMLElement): number | null {
-    const wordElement = AmLyrics.getWordElementForSyllable(syllable);
-    if (!wordElement) return null;
-
-    const cacheTarget = wordElement as any;
-    if (cacheTarget._cachedWipeHandoffEndTime !== undefined) {
-      return cacheTarget._cachedWipeHandoffEndTime as number | null;
-    }
-
-    const wordElements = AmLyrics.getCachedVirtualWordElements(wordElement);
-    const wordSyllables = AmLyrics.getRenderedWordSyllables(syllable);
-    const lastSyllable = wordSyllables[wordSyllables.length - 1] || syllable;
-    const vocalTrack = AmLyrics.getVocalTrack(syllable) as HTMLElement | null;
-    let handoffEndTime: number | null = null;
-
-    if (
-      vocalTrack &&
-      !syllable.classList.contains('line-synced') &&
-      AmLyrics.hasTextBoundaryAfter(lastSyllable)
-    ) {
-      const trackTarget = vocalTrack as any;
-      if (!trackTarget._cachedTimedSyllables) {
-        trackTarget._cachedTimedSyllables = Array.from(
-          vocalTrack.querySelectorAll('.lyrics-syllable'),
-        ).filter(
-          element =>
-            !(element as HTMLElement).classList.contains('transliteration'),
-        ) as HTMLElement[];
-      }
-      const trackSyllables = trackTarget._cachedTimedSyllables as HTMLElement[];
-      const lastIndex = trackSyllables.indexOf(lastSyllable);
-      const nextSyllable = trackSyllables[lastIndex + 1];
-
-      if (nextSyllable && !nextSyllable.classList.contains('line-synced')) {
-        const currentEndTimeMs = Number.parseFloat(
-          wordElement.dataset.virtualWordEnd ||
-            `${(lastSyllable as any)._cachedEndTime}`,
-        );
-        const currentStartTimeMs = Number.parseFloat(
-          wordElement.dataset.virtualWordStart ||
-            `${(wordSyllables[0] as any)?._cachedStartTime}`,
-        );
-        const finalSyllableStartTimeMs = Number.parseFloat(
-          `${(lastSyllable as any)._cachedStartTime}`,
-        );
-        const nextStartTimeMs = Number.parseFloat(
-          `${(nextSyllable as any)._cachedStartTime}`,
-        );
-        const gapMs = nextStartTimeMs - currentEndTimeMs;
-        const preWipeDuration = AmLyrics.getWordPreWipeDuration(nextSyllable);
-        const candidateEndTime = nextStartTimeMs - preWipeDuration;
-
-        if (
-          Number.isFinite(currentStartTimeMs) &&
-          Number.isFinite(currentEndTimeMs) &&
-          Number.isFinite(finalSyllableStartTimeMs) &&
-          Number.isFinite(nextStartTimeMs) &&
-          gapMs >= 0 &&
-          gapMs <= NEXT_WORD_PRE_WIPE_MAX_GAP_MS &&
-          preWipeDuration > 0 &&
-          candidateEndTime -
-            Math.max(currentStartTimeMs, finalSyllableStartTimeMs) >=
-            NEXT_WORD_PRE_WIPE_MIN_DURATION_MS
-        ) {
-          handoffEndTime = candidateEndTime;
-        }
-      }
-    }
-
-    wordElements.forEach(element => {
-      const target = element as any;
-      target._cachedWipeHandoffEndTime = handoffEndTime;
-    });
-    return handoffEndTime;
-  }
-
   private static maybePreWipeNextWord(
     syllables: HTMLElement[],
     index: number,
@@ -6743,6 +6733,11 @@ export class AmLyrics extends LitElement {
     ) {
       return;
     }
+
+    const currentWordReady =
+      syllable.classList.contains('finished') ||
+      currentTimeMs >= currentEndTimeMs - WORD_PRE_WIPE_HANDOFF_LEAD_MS;
+    if (!currentWordReady) return;
 
     const nextSyllable = AmLyrics.getNextWordSyllable(syllables, index);
     if (
@@ -6772,38 +6767,24 @@ export class AmLyrics extends LitElement {
       preWipeSyllables,
     );
     if (preWipeDuration <= 0) return;
-    const preWipeStart = nextStartTimeMs - preWipeDuration;
-    const currentWordElement = AmLyrics.getWordElementForSyllable(syllable);
-    const currentWordStartMs = Number.parseFloat(
-      currentWordElement?.dataset.virtualWordStart ||
-        `${(syllable as any)._cachedStartTime}`,
-    );
-    const currentSyllableStartMs = Number.parseFloat(
-      `${(syllable as any)._cachedStartTime}`,
+    const preWipeStart = Math.max(
+      nextStartTimeMs - preWipeDuration,
+      currentEndTimeMs - WORD_PRE_WIPE_HANDOFF_LEAD_MS,
     );
 
-    // Reserve the complete pre-wipe window. If the source timestamps leave no
-    // room for both words, skip only that impossible handoff rather than
-    // overlapping two independent wipe gradients.
-    if (
-      !Number.isFinite(currentWordStartMs) ||
-      !Number.isFinite(currentSyllableStartMs) ||
-      preWipeStart - Math.max(currentWordStartMs, currentSyllableStartMs) <
-        NEXT_WORD_PRE_WIPE_MIN_DURATION_MS ||
-      currentTimeMs < preWipeStart ||
-      currentTimeMs >= nextStartTimeMs
-    ) {
+    if (currentTimeMs < preWipeStart || currentTimeMs >= nextStartTimeMs) {
       return;
     }
 
     if (AmLyrics.isPreWipeArmed(nextSyllable)) return;
 
+    const effectivePreWipeDuration = nextStartTimeMs - preWipeStart;
     AmLyrics.applyWordPreWipe(
       nextSyllable,
       preWipeSyllables,
       currentTimeMs,
       preWipeStart,
-      preWipeDuration,
+      effectivePreWipeDuration,
     );
   }
 
@@ -6918,21 +6899,7 @@ export class AmLyrics extends LitElement {
     const wordElapsedTimeMs = Number.isFinite(virtualWordStartMs)
       ? elapsedTimeMs + (syllableStartMs - virtualWordStartMs)
       : elapsedTimeMs;
-    const nominalCharWipeDurationMs = Math.max(
-      wordDurationMs,
-      syllableDurationMs,
-    );
-    const handoffEndTimeMs = AmLyrics.getWipeHandoffEndTime(syllable);
-    const wipeTimelineStartMs = Number.isFinite(virtualWordStartMs)
-      ? virtualWordStartMs
-      : syllableStartMs;
-    const charWipeDurationMs =
-      handoffEndTimeMs === null
-        ? nominalCharWipeDurationMs
-        : Math.min(
-            nominalCharWipeDurationMs,
-            Math.max(1, handoffEndTimeMs - wipeTimelineStartMs),
-          );
+    const charWipeDurationMs = Math.max(wordDurationMs, syllableDurationMs);
 
     const charAnimationsMap = new Map<HTMLElement, string>();
     const styleUpdates: Array<{
@@ -7132,13 +7099,7 @@ export class AmLyrics extends LitElement {
       const wipeCharCount = AmLyrics.getVisibleCharacterCount(syllable);
       const wipeScale = AmLyrics.getLongWordWipeScale(wipeCharCount);
       const nominalVisualDuration = syllableDurationMs * wipeRatio * wipeScale;
-      const visualDuration =
-        handoffEndTimeMs === null
-          ? nominalVisualDuration
-          : Math.min(
-              nominalVisualDuration,
-              Math.max(1, handoffEndTimeMs - syllableStartMs),
-            );
+      const visualDuration = nominalVisualDuration;
       AmLyrics.applyWipeShape(syllable, wipeCharCount);
 
       let wipeAnimation = 'wipe';
