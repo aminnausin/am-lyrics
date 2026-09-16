@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.6.3';
+const VERSION = '1.7.0';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -25,8 +25,6 @@ const NEXT_WORD_PRE_WIPE_MAX_DURATION_MS = 240;
 const BASE_WIPE_GRADIENT_EM = 0.75;
 const LONG_WORD_WIPE_EXTRA_EM = 0.45;
 const LONG_WORD_WIPE_EXTRA_RATIO = 0.35;
-const SHORT_WORD_DRAG_MIN_DURATION_MS = 760;
-const SHORT_WORD_GLOW_MIN_DURATION_MS = 1360;
 const WORD_PRE_WIPE_HANDOFF_LEAD_MS = 100;
 const NEXT_LINE_BASE_BLUR_EM = 0.02;
 const NEXT_LINE_UNBLUR_DURATION_MS = 2000;
@@ -155,6 +153,7 @@ export class AmLyrics extends LitElement {
       --am-lyrics-background-vocal-font-size: 0.65em;
       --am-lyrics-background-vocal-stack-shift: 7.5px;
       --am-lyrics-background-vocal-max-height: 8em;
+      --am-lyrics-background-vocal-enter-duration: 650ms;
       --am-lyrics-background-vocal-exit-duration: 450ms;
       --am-lyrics-instrumental-height: 40px;
       --am-lyrics-instrumental-spacing: 16px;
@@ -163,14 +162,15 @@ export class AmLyrics extends LitElement {
       --am-lyrics-instrumental-exit-duration: 350ms;
       --am-lyrics-instrumental-exit-scale: 0;
       --am-lyrics-inactive-scale: 0.98;
-      --am-lyrics-background-vocal-scale: 0.9;
+      --am-lyrics-background-vocal-scale: 0.96;
       --am-lyrics-touch-scale: 0.96;
       --am-lyrics-highlight-radius: 16px;
       --am-lyrics-highlight-surface: rgba(255, 255, 255, 0.08);
       --am-lyrics-progression-feather: 30px;
       --am-lyrics-glow-radius: 5px;
       --am-lyrics-inline-padding: 20px;
-      --char-rise-y: -2px;
+      --am-lyrics-lift: 1;
+      --char-rise-y: -3px;
       --am-lyrics-character-rise-peak: -1.25px;
 
       --lyplus-blur-amount: 0.07em;
@@ -238,22 +238,6 @@ export class AmLyrics extends LitElement {
       filter: none !important;
     }
 
-    .lyrics-line.scroll-animate {
-      /* Preserve the graceful fade duration; the keyframe handles the
-         transform, so we only need to keep opacity/filter transitions
-         alive without !important overriding the base rule. */
-      transition:
-        opacity 0.7s ease,
-        filter 0.7s ease,
-        transform 0.4s cubic-bezier(0.41, 0, 0.12, 0.99)
-          var(--lyrics-line-delay, 0ms);
-      animation-name: lyrics-scroll;
-      animation-duration: var(--scroll-duration, 400ms);
-      animation-timing-function: cubic-bezier(0.41, 0, 0.12, 0.99);
-      animation-fill-mode: both;
-      animation-delay: var(--lyrics-line-delay, 0ms);
-    }
-
     .lyrics-container.user-scrolling .lyrics-line {
       --lyrics-line-delay: 0ms !important;
       transition-delay: 0ms !important;
@@ -314,7 +298,7 @@ export class AmLyrics extends LitElement {
         color-mix(in srgb, var(--lyplus-text-primary) 72%, transparent);
     }
 
-    .lyrics-line:not(.scroll-animate) {
+    .lyrics-line {
       animation: none;
     }
 
@@ -355,8 +339,12 @@ export class AmLyrics extends LitElement {
       padding: 0;
       box-sizing: border-box;
       color: color-mix(in srgb, var(--lyplus-text-secondary) 80%, transparent);
-      transition: height var(--scroll-duration, 400ms)
-        cubic-bezier(0.41, 0, 0.12, 0.99);
+      transition: height
+        var(
+          --background-vocal-exit-duration,
+          var(--am-lyrics-background-vocal-enter-duration)
+        )
+        cubic-bezier(0.22, 1, 0.36, 1);
       margin: 0;
       pointer-events: none;
     }
@@ -366,16 +354,13 @@ export class AmLyrics extends LitElement {
       padding-top: 0.08em;
       padding-bottom: 0.14em;
       opacity: 0;
-      filter: blur(var(--lyplus-blur-amount));
-      transform: scale(var(--am-lyrics-background-vocal-scale));
+      transform: translateY(var(--background-vocal-offset, 6px))
+        scale(var(--am-lyrics-background-vocal-scale));
       transform-origin: left center;
       transition:
-        padding-top var(--scroll-duration, 400ms) cubic-bezier(0.2, 0.8, 0.2, 1),
-        padding-bottom var(--scroll-duration, 400ms)
-          cubic-bezier(0.2, 0.8, 0.2, 1),
-        opacity 320ms cubic-bezier(0.2, 0, 0, 1),
-        filter 320ms cubic-bezier(0.2, 0, 0, 1),
-        transform 400ms cubic-bezier(0.2, 0.8, 0.2, 1);
+        opacity 280ms cubic-bezier(0.2, 0, 0, 1),
+        transform var(--am-lyrics-background-vocal-enter-duration)
+          cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .lyrics-line.singer-right .background-vocal-container,
@@ -384,54 +369,37 @@ export class AmLyrics extends LitElement {
       margin-right: 0;
     }
 
-    /* Background vocals expand only when .bg-expanded is present.
-       This is separate from .active so bg vocals can collapse immediately
-       while .active stays to keep text white until the scroll passes. */
+    /* Stable padding keeps the text's anchor fixed while space opens below it.
+       Opacity/transform run independently of the lyric scroll look-ahead. */
     .lyrics-line.bg-expanded .background-vocal-container {
-      height: calc(
-        var(
-            --am-lyrics-background-vocal-height,
-            var(--am-lyrics-background-vocal-max-height)
-          ) +
-          var(--am-lyrics-background-vocal-spacing)
+      height: var(
+        --am-lyrics-background-vocal-height,
+        var(--am-lyrics-background-vocal-max-height)
       );
     }
 
     .lyrics-line.bg-expanded .background-vocal-wrap {
       opacity: 1;
-      filter: blur(0);
-      transform: scale(1);
-      will-change: opacity, filter, transform;
+      transform: translateY(0) scale(1);
     }
 
-    /* During exit, collapse the layout shell with the lyric scroll while an
-       absolutely positioned copy of its normal wrapper remains unclipped and
-       scales away in place. This lets following lines reclaim the space in the
-       same motion instead of after the background vocal has disappeared. */
     .lyrics-line.bg-collapsing .background-vocal-container {
-      display: flex;
-      align-items: center;
       height: 0;
     }
 
     .lyrics-line.bg-collapsing .background-vocal-wrap {
-      position: relative;
-      flex: 0 0 auto;
-      width: 100%;
       opacity: 0;
-      filter: blur(var(--lyplus-blur-amount));
-      transform: scale(var(--am-lyrics-background-vocal-scale));
-      animation: background-vocal-scale-out
-        var(
-          --background-vocal-exit-duration,
-          var(--am-lyrics-background-vocal-exit-duration)
-        )
-        linear both;
-      transition:
-        padding-top var(--scroll-duration, 400ms) cubic-bezier(0.2, 0.8, 0.2, 1),
-        padding-bottom var(--scroll-duration, 400ms)
-          cubic-bezier(0.2, 0.8, 0.2, 1);
-      will-change: opacity, filter, transform;
+      transform: translateY(var(--background-vocal-offset, 6px))
+        scale(var(--am-lyrics-background-vocal-scale));
+      transition-duration: var(--background-vocal-exit-duration, 450ms);
+    }
+
+    .lyrics-line:is(.bg-expanded, .bg-collapsing) .main-vocal-container {
+      transition-duration: var(
+        --background-vocal-exit-duration,
+        var(--am-lyrics-background-vocal-enter-duration)
+      );
+      transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
     }
 
     .lyrics-line.bg-expanded.bg-after .main-vocal-container {
@@ -444,15 +412,12 @@ export class AmLyrics extends LitElement {
       transform: translateY(var(--am-lyrics-background-vocal-stack-shift));
     }
 
-    .lyrics-line:is(.bg-expanded, .bg-collapsing)
-      .background-vocal-container.background-after
-      .background-vocal-wrap {
+    .background-vocal-container.background-after .background-vocal-wrap {
       padding-top: calc(var(--am-lyrics-background-vocal-spacing) + 0.08em);
     }
 
-    .lyrics-line:is(.bg-expanded, .bg-collapsing)
-      .background-vocal-container.background-before
-      .background-vocal-wrap {
+    .background-vocal-container.background-before .background-vocal-wrap {
+      --background-vocal-offset: -6px;
       padding-bottom: calc(var(--am-lyrics-background-vocal-spacing) + 0.14em);
     }
 
@@ -585,7 +550,7 @@ export class AmLyrics extends LitElement {
 
     /* Viewport Virtualization: Strip expensive filters and animations from
        offscreen lines.  IntersectionObserver toggles this class. */
-    .lyrics-line.far-line:not(.scroll-animate) {
+    .lyrics-line.far-line {
       filter: none !important;
       will-change: auto !important;
       animation: none !important;
@@ -677,6 +642,24 @@ export class AmLyrics extends LitElement {
 
     .lyrics-word.allow-break {
       display: inline;
+    }
+
+    .lyrics-line .lyrics-word .lyrics-syllable.has-chars {
+      transform: none !important;
+    }
+
+    .lyrics-line .lyrics-word .lyrics-syllable .char.native-motion {
+      transform-origin: 50% 80%;
+      transition-property: color, background-color !important;
+    }
+
+    .reduced-motion
+      .lyrics-line
+      .lyrics-word
+      .lyrics-syllable
+      .char.native-motion {
+      transform: none !important;
+      text-shadow: none !important;
     }
 
     .lyrics-word.char-rise {
@@ -827,23 +810,39 @@ export class AmLyrics extends LitElement {
 
     /* Non-growable words float up with a gentle curve */
     .lyrics-line.active:not(.lyrics-gap)
-      .lyrics-word:not(.growable):not(.char-drag)
-      .lyrics-syllable.highlight {
-      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
+      .lyrics-word
+      .lyrics-syllable.no-chars.highlight {
+      transform: translate3d(
+        0,
+        calc(var(--char-rise-y, -1.12px) * var(--am-lyrics-lift)),
+        0
+      );
     }
 
     .lyrics-line.persist-highlight:not(.lyrics-gap)
-      .lyrics-word:not(.growable):not(.char-drag)
-      .lyrics-syllable.finished {
-      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
+      .lyrics-word
+      .lyrics-syllable.no-chars.finished {
+      transform: translate3d(
+        0,
+        calc(var(--char-rise-y, -1.12px) * var(--am-lyrics-lift)),
+        0
+      );
     }
 
     .lyrics-word.growable .lyrics-syllable.cleanup .char {
-      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
+      transform: translate3d(
+        0,
+        calc(var(--char-rise-y, -1.12px) * var(--am-lyrics-lift)),
+        0
+      );
     }
 
     .lyrics-word.char-drag .lyrics-syllable.cleanup .char {
-      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
+      transform: translate3d(
+        0,
+        calc(var(--char-rise-y, -1.12px) * var(--am-lyrics-lift)),
+        0
+      );
     }
 
     .lyrics-line.persist-highlight
@@ -854,7 +853,11 @@ export class AmLyrics extends LitElement {
       .lyrics-word.char-drag
       .lyrics-syllable.finished
       .char {
-      transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
+      transform: translate3d(
+        0,
+        calc(var(--char-rise-y, -1.12px) * var(--am-lyrics-lift)),
+        0
+      );
     }
 
     /* Background vocal overrides — placed AFTER main rules so they win
@@ -916,13 +919,17 @@ export class AmLyrics extends LitElement {
 
     .lyrics-line.active:not(.lyrics-gap)
       .background-vocal-container
-      .lyrics-word:not(.growable):not(.char-drag)
-      .lyrics-syllable.highlight,
+      .lyrics-word
+      .lyrics-syllable.no-chars.highlight,
     .lyrics-line.persist-highlight:not(.lyrics-gap)
       .background-vocal-container
-      .lyrics-word:not(.growable):not(.char-drag)
-      .lyrics-syllable.finished {
-      transform: translate3d(0, calc(var(--char-rise-y) * 1.5), 0);
+      .lyrics-word
+      .lyrics-syllable.no-chars.finished {
+      transform: translate3d(
+        0,
+        calc(var(--char-rise-y) * var(--am-lyrics-lift)),
+        0
+      );
     }
 
     .lyrics-syllable.pre-highlight {
@@ -983,24 +990,25 @@ export class AmLyrics extends LitElement {
       background-clip: text;
       -webkit-background-clip: text;
       background-repeat: no-repeat;
-      background-image:
-        linear-gradient(
-          90deg,
-          #ffffff00 0%,
-          var(--lyplus-text-primary, #fff) 50%,
-          #0000 100%
-        ),
-        linear-gradient(
-          90deg,
-          var(--lyplus-text-primary, #fff) 100%,
-          #0000 100%
-        );
-      background-size:
-        var(--wipe-gradient-width, 0.75em) 100%,
-        0% 100%;
-      background-position:
-        calc(-1 * var(--wipe-gradient-width, 0.75em)) 0%,
-        left;
+      /* Each glyph samples the same segment-wide gradient at its own x offset. */
+      background-image: linear-gradient(
+        90deg,
+        var(--lyplus-text-primary, #fff) 0%,
+        var(--lyplus-text-primary, #fff)
+          calc(100% - var(--wipe-gradient-width, 0.75em)),
+        #0000 100%
+      );
+      background-size: calc(
+          var(--word-wipe-width, 1ch) + var(--wipe-gradient-width, 0.75em)
+        )
+        100%;
+      background-position: calc(
+          var(--char-wipe-position, 0px) - var(--word-wipe-width, 1ch) - var(
+              --wipe-gradient-width,
+              0.75em
+            )
+        )
+        0%;
       transition:
         transform 0.7s ease,
         color 0.18s;
@@ -1019,7 +1027,7 @@ export class AmLyrics extends LitElement {
     }
 
     .lyrics-line.active .lyrics-syllable span.char.pre-wipe-lead {
-      animation-name: char-pre-wipe;
+      animation-name: char-word-wipe;
       animation-duration: var(--pre-wipe-duration);
       animation-delay: var(--pre-wipe-delay);
       animation-timing-function: linear;
@@ -1226,15 +1234,6 @@ export class AmLyrics extends LitElement {
     .lyrics-footer.active {
       opacity: 1;
       color: rgba(255, 255, 255, 0.5); /* Grey instead of primary */
-    }
-
-    .lyrics-footer.scroll-animate {
-      transition: none !important;
-      animation-name: lyrics-scroll;
-      animation-duration: var(--scroll-duration, 280ms);
-      animation-timing-function: cubic-bezier(0.41, 0, 0.12, 0.99);
-      animation-fill-mode: both;
-      animation-delay: var(--lyrics-line-delay, 0ms);
     }
 
     .lyrics-container.blur-inactive-enabled:not(.not-focused)
@@ -1632,63 +1631,21 @@ export class AmLyrics extends LitElement {
       }
     }
 
-    /* Character-rendered words use a separate moving gradient in front of
-       their solid fill. This makes the individual glyph wipes read as one
-       continuous word-level wipe. */
-    @keyframes char-pre-wipe {
+    /* One moving edge in text coordinates, independent of glyph rise/scale.
+       LyricsBlossom's glyph draw loop (RVA 0x2f6aa0) likewise reuses the paint
+       prepared before the loop instead of restarting a wipe for each glyph. */
+    @keyframes char-word-wipe {
       from {
-        background-size:
-          var(--wipe-gradient-width, 0.75em) 100%,
-          0% 100%;
-        background-position:
-          calc(-1 * var(--wipe-gradient-width, 0.75em)) 0%,
-          left;
+        background-position: calc(
+            var(--char-wipe-position, 0px) - var(--word-wipe-width, 1ch) - var(
+                --wipe-gradient-width,
+                0.75em
+              )
+          )
+          0%;
       }
       to {
-        background-size:
-          var(--wipe-gradient-width, 0.75em) 100%,
-          0% 100%;
-        background-position:
-          calc(-1 * var(--wipe-gradient-half, 0.375em)) 0%,
-          left;
-      }
-    }
-
-    @keyframes char-start-wipe {
-      from {
-        background-size:
-          var(--wipe-gradient-width, 0.75em) 100%,
-          0% 100%;
-        background-position:
-          calc(-1 * var(--wipe-gradient-width, 0.75em)) 0%,
-          left;
-      }
-      to {
-        background-size:
-          var(--wipe-gradient-width, 0.75em) 100%,
-          100% 100%;
-        background-position:
-          calc(100% + var(--wipe-gradient-half, 0.375em)) 0%,
-          left;
-      }
-    }
-
-    @keyframes char-wipe {
-      from {
-        background-size:
-          var(--wipe-gradient-width, 0.75em) 100%,
-          0% 100%;
-        background-position:
-          calc(-1 * var(--wipe-gradient-half, 0.375em)) 0%,
-          left;
-      }
-      to {
-        background-size:
-          var(--wipe-gradient-width, 0.75em) 100%,
-          100% 100%;
-        background-position:
-          calc(100% + var(--wipe-gradient-half, 0.375em)) 0%,
-          left;
+        background-position: var(--char-wipe-position, 0px) 0%;
       }
     }
 
@@ -1701,92 +1658,8 @@ export class AmLyrics extends LitElement {
       }
     }
 
-    @keyframes background-vocal-scale-out {
-      0%,
-      18% {
-        opacity: 1;
-        filter: blur(0);
-        transform: scale(1);
-      }
-      100% {
-        opacity: 0;
-        filter: blur(var(--lyplus-blur-amount));
-        transform: scale(var(--am-lyrics-background-vocal-scale));
-      }
-    }
-
-    /* Scroll animation — class is removed and re-added (with a forced
-       reflow in between) to reliably restart the animation each time */
-    @keyframes lyrics-scroll {
-      from {
-        transform: translate3d(0, var(--scroll-delta), 0);
-      }
-      to {
-        transform: translate3d(0, 0, 0);
-      }
-    }
-
     /* Character grow animation — translate3d+scale3d for smooth transform,
        drop-shadow for glow */
-    @keyframes grow-dynamic {
-      0% {
-        transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
-        filter: drop-shadow(
-          0 0 0
-            color-mix(in srgb, var(--lyplus-lyrics-palette), transparent 100%)
-        );
-      }
-      25%,
-      30% {
-        transform: translate3d(
-            var(--char-offset-x, 0px),
-            var(--translate-y-peak, -2px),
-            0
-          )
-          scale3d(var(--matrix-scale, 1.1), var(--matrix-scale, 1.1), 1);
-        filter: drop-shadow(
-          0 0 var(--am-lyrics-glow-radius)
-            color-mix(
-              in srgb,
-              var(--lyplus-lyrics-palette),
-              transparent calc((1 - var(--shadow-intensity, 1)) * 100%)
-            )
-        );
-      }
-      75%,
-      100% {
-        transform: translate3d(0, var(--char-rise-y, -1.12px), 0)
-          scale3d(1, 1, 1);
-        filter: drop-shadow(
-          0 0 0
-            color-mix(in srgb, var(--lyplus-lyrics-palette), transparent 100%)
-        );
-      }
-    }
-
-    @keyframes rise-char {
-      0%,
-      100% {
-        transform: translate3d(0, 0, 0);
-      }
-      55% {
-        transform: translate3d(
-          0,
-          var(--am-lyrics-character-rise-peak, -1.25px),
-          0
-        );
-      }
-    }
-
-    @keyframes drag-char {
-      0% {
-        transform: translate3d(0, 0, 0);
-      }
-      100% {
-        transform: translate3d(0, var(--char-rise-y, -1.12px), 0);
-      }
-    }
-
     @keyframes grow-static {
       0%,
       100% {
@@ -1936,24 +1809,44 @@ export class AmLyrics extends LitElement {
       }
     }
 
-    @media (prefers-reduced-motion: reduce) {
-      .lyrics-line,
-      .lyrics-line::before,
-      .lyrics-line-container,
-      .background-vocal-container,
-      .background-vocal-wrap,
-      .lyrics-syllable,
-      .lyrics-syllable span.char,
-      .lyrics-gap .main-vocal-container,
-      .lyrics-plus-metadata,
-      .lyrics-footer,
-      .download-button,
-      .source-switch-btn {
-        animation-duration: 1ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 1ms !important;
-        transition-delay: 0ms !important;
-      }
+    :host([no-blur]) .lyrics-line {
+      filter: none !important;
+      transition-property: opacity, transform !important;
+    }
+
+    /* Keep geometry and keyboard seeking intact when played lines fade out. */
+    :host([hide-played-lines])
+      .lyrics-container:not(.user-scrolling):not(.touch-scrolling)
+      .lyrics-line.played:not(:focus-within) {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .lyrics-container.reduced-motion .lyrics-line,
+    .lyrics-container.reduced-motion .lyrics-line::before,
+    .lyrics-container.reduced-motion .lyrics-line-container,
+    .lyrics-container.reduced-motion .main-vocal-container,
+    .lyrics-container.reduced-motion .background-vocal-container,
+    .lyrics-container.reduced-motion .background-vocal-wrap,
+    .lyrics-container.reduced-motion .lyrics-plus-metadata,
+    .lyrics-container.reduced-motion .lyrics-footer {
+      animation: none !important;
+      transition: none !important;
+    }
+
+    .lyrics-container.reduced-motion .lyrics-line,
+    .lyrics-container.reduced-motion .lyrics-line-container,
+    .lyrics-container.reduced-motion .main-vocal-container,
+    .lyrics-container.reduced-motion .background-vocal-wrap,
+    .lyrics-container.reduced-motion .lyrics-syllable,
+    .lyrics-container.reduced-motion .lyrics-syllable span.char {
+      transform: none !important;
+    }
+
+    /* Word wipes carry timing information; only disable character decoration. */
+    .lyrics-container.reduced-motion .lyrics-syllable span.char {
+      filter: none !important;
+      transition: none !important;
     }
   `;
 
@@ -1998,6 +1891,34 @@ export class AmLyrics extends LitElement {
 
   @property({ type: Boolean })
   interpolate = true;
+
+  /** Disable distance and predictive blur without changing lyric timing. */
+  @property({ type: Boolean, attribute: 'no-blur', reflect: true })
+  noBlur = false;
+
+  @property({ type: Boolean, attribute: 'hide-played-lines', reflect: true })
+  hidePlayedLines = false;
+
+  /** Also enabled automatically by the system reduced-motion preference. */
+  @property({ type: Boolean, attribute: 'reduced-motion' })
+  reducedMotion = false;
+
+  /** Browser implementations; these are not the native app's version IDs. */
+  @property({ type: String, attribute: 'line-motion' })
+  lineMotion: 'staggered' | 'uniform' | 'instant' = 'staggered';
+
+  @state()
+  private systemReducedMotion = false;
+
+  private motionPreference?: MediaQueryList;
+
+  private get shouldReduceMotion(): boolean {
+    return this.reducedMotion || this.systemReducedMotion;
+  }
+
+  private readonly handleMotionPreference = (event: MediaQueryListEvent) => {
+    this.systemReducedMotion = event.matches;
+  };
 
   @state()
   private showRomanization = false;
@@ -2089,12 +2010,6 @@ export class AmLyrics extends LitElement {
     // If the new time is significantly smaller than the old time (e.g. song looped)
     if (value < oldValue && oldValue - value > 1000 && this.lyrics) {
       this.activeLineIndices = [];
-      this.activeMainWordIndices.clear();
-      this.activeBackgroundWordIndices.clear();
-      this.mainWordProgress.clear();
-      this.backgroundWordProgress.clear();
-      this.mainWordAnimations.clear();
-      this.backgroundWordAnimations.clear();
       this.preActiveLineElements = [];
       this.positionedLineElements = [];
       this.activeGapLineElements = [];
@@ -2147,14 +2062,6 @@ export class AmLyrics extends LitElement {
 
   private activeLineIndices: number[] = [];
 
-  private activeMainWordIndices: Map<number, number> = new Map();
-
-  private activeBackgroundWordIndices: Map<number, number> = new Map();
-
-  private mainWordProgress: Map<number, number> = new Map();
-
-  private backgroundWordProgress: Map<number, number> = new Map();
-
   @state()
   private lyricsSource: string | null = null;
 
@@ -2186,18 +2093,6 @@ export class AmLyrics extends LitElement {
         : 'Switch';
     }
   }
-
-  private animationFrameId?: number;
-
-  private mainWordAnimations: Map<
-    number,
-    { startTime: number; duration: number }
-  > = new Map();
-
-  private backgroundWordAnimations: Map<
-    number,
-    { startTime: number; duration: number }
-  > = new Map();
 
   @query('.lyrics-container')
   private lyricsContainer?: HTMLElement;
@@ -2250,7 +2145,6 @@ export class AmLyrics extends LitElement {
     groupGlowing: boolean[];
     groupCharRise: boolean[];
     groupCharDrag: boolean[];
-    vwFullText: string[];
     vwFullDuration: number[];
     vwCharOffset: number[];
     vwStartMs: number[];
@@ -2265,27 +2159,14 @@ export class AmLyrics extends LitElement {
 
   private lastPrimaryActiveLine: HTMLElement | null = null;
 
-  private backgroundExpandedLine: HTMLElement | null = null;
+  private backgroundExpandedLines = new Map<
+    HTMLElement,
+    { start: number; end: number }
+  >();
 
   private backgroundCollapseTimeouts = new Map<HTMLElement, number>();
 
-  private backgroundExpandFrameId?: number;
-
-  // Scroll animation state
-  private scrollAnimationState: {
-    isAnimating: boolean;
-    pendingUpdate: number | null;
-    pendingReferenceElement: HTMLElement | null;
-    pendingScrollDuration: number | undefined;
-  } | null = null;
-
   private currentScrollOffset = 0;
-
-  private animatingLines: HTMLElement[] = [];
-
-  private scrollAnimationTimeout?: ReturnType<typeof setTimeout>;
-
-  private scrollUnlockTimeout?: ReturnType<typeof setTimeout>;
 
   // AbortController for cancelling in-flight lyrics fetches
   private fetchAbortController?: AbortController;
@@ -2310,19 +2191,30 @@ export class AmLyrics extends LitElement {
   // Bound handler references for proper event listener removal
   private _boundHandleUserScroll = this.handleUserScroll.bind(this);
 
-  private _boundAnimateProgress = this.animateProgress.bind(this);
-
   connectedCallback() {
     super.connectedCallback();
+    this.motionPreference = window.matchMedia(
+      '(prefers-reduced-motion: reduce)',
+    );
+    this.systemReducedMotion = this.motionPreference.matches;
+    this.motionPreference.addEventListener(
+      'change',
+      this.handleMotionPreference,
+    );
     this.fetchLyrics();
   }
 
   disconnectedCallback() {
     super.disconnectedCallback();
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = undefined;
-    }
+    this.motionPreference?.removeEventListener(
+      'change',
+      this.handleMotionPreference,
+    );
+    this.motionPreference = undefined;
+    this.cancelLineScrollAnimation();
+    this.lyricsContainer
+      ?.querySelectorAll<HTMLElement>('.native-motion')
+      .forEach(char => AmLyrics.clearCharacterMotion(char));
     if (this.userScrollTimeoutId) {
       clearTimeout(this.userScrollTimeoutId);
       this.userScrollTimeoutId = undefined;
@@ -2331,22 +2223,10 @@ export class AmLyrics extends LitElement {
       clearTimeout(this.clickSeekTimeout);
       this.clickSeekTimeout = undefined;
     }
-    if (this.scrollAnimationTimeout) {
-      clearTimeout(this.scrollAnimationTimeout);
-      this.scrollAnimationTimeout = undefined;
-    }
-    if (this.scrollUnlockTimeout) {
-      clearTimeout(this.scrollUnlockTimeout);
-      this.scrollUnlockTimeout = undefined;
-    }
     for (const timeoutId of this.backgroundCollapseTimeouts.values()) {
       clearTimeout(timeoutId);
     }
     this.backgroundCollapseTimeouts.clear();
-    if (this.backgroundExpandFrameId !== undefined) {
-      cancelAnimationFrame(this.backgroundExpandFrameId);
-      this.backgroundExpandFrameId = undefined;
-    }
     // Cancel any in-flight fetch requests
     this.fetchAbortController?.abort();
     this.fetchAbortController = undefined;
@@ -2527,12 +2407,6 @@ export class AmLyrics extends LitElement {
 
   private async onLyricsLoaded() {
     this.activeLineIndices = [];
-    this.activeMainWordIndices.clear();
-    this.activeBackgroundWordIndices.clear();
-    this.mainWordProgress.clear();
-    this.backgroundWordProgress.clear();
-    this.mainWordAnimations.clear();
-    this.backgroundWordAnimations.clear();
     this.preActiveLineElements = [];
     this.positionedLineElements = [];
     this.activeGapLineElements = [];
@@ -4142,6 +4016,7 @@ export class AmLyrics extends LitElement {
    * updateSyllablesForLine.
    */
   private _onTimeChanged(oldTime: number, newTime: number): void {
+    if (this.hidePlayedLines) this.updatePlayedLines(newTime);
     const timeDiff = Math.abs(newTime - oldTime);
     const isSeek = timeDiff > SEEK_THRESHOLD_MS;
 
@@ -4220,7 +4095,7 @@ export class AmLyrics extends LitElement {
         );
       }
 
-      this.startAnimationFromTime(newTime);
+      this.activeLineIndices = newActiveLines;
     }
 
     // Predictive scroll: run on every tick so we scroll *before* the next
@@ -4237,6 +4112,16 @@ export class AmLyrics extends LitElement {
         if (lineElement) {
           AmLyrics.updateSyllablesForLine(lineElement, newTime);
         }
+      }
+
+      const firstActive = this.activeLineIndices[0] ?? this.lyrics?.length ?? 0;
+      for (
+        let index = Math.max(0, firstActive - 3);
+        index < firstActive;
+        index += 1
+      ) {
+        const outgoing = this._getLineElement(index);
+        if (outgoing) AmLyrics.updateCharacterMotion(outgoing, newTime);
       }
 
       // Tie gap motion directly to playback time. This keeps the entrance,
@@ -4320,6 +4205,26 @@ export class AmLyrics extends LitElement {
     }
   }
 
+  private updatePlayedLines(time: number): void {
+    if (!this.lyrics) return;
+    this.lyrics.forEach((line, index) => {
+      const played =
+        this.hidePlayedLines &&
+        this.getLineHighlightEndTime(index) > line.timestamp &&
+        time >= this.getLineHighlightEndTime(index);
+      this._getLineElement(index)?.classList.toggle('played', played);
+    });
+  }
+
+  protected willUpdate(
+    changedProperties: Map<string | number | symbol, unknown>,
+  ) {
+    if (changedProperties.has('lyrics')) {
+      this.cachedLineData = null;
+      this._ensureLineDataCache();
+    }
+  }
+
   updated(changedProperties: Map<string | number | symbol, unknown>) {
     const lyricsDomBecameRenderable =
       changedProperties.has('lyrics') ||
@@ -4385,16 +4290,32 @@ export class AmLyrics extends LitElement {
       }
     }
 
+    if (lyricsDomBecameRenderable || changedProperties.has('hidePlayedLines')) {
+      this.updatePlayedLines(this.currentTime);
+    }
+    if (changedProperties.has('noBlur') && this.noBlur) {
+      this.clearProgressiveBlurLine();
+    }
+    if (
+      changedProperties.has('reducedMotion') ||
+      changedProperties.has('systemReducedMotion') ||
+      changedProperties.has('lineMotion')
+    ) {
+      this.cancelLineScrollAnimation();
+      if (this.lyricsContainer) {
+        // Cancel an in-flight native smooth scroll at its current position.
+        this.lyricsContainer.scrollTo({
+          top: this.lyricsContainer.scrollTop,
+          behavior: 'instant',
+        });
+      }
+      if (this.lyrics) this._onTimeChanged(this.currentTime, this.currentTime);
+    }
+
     // Handle duration reset (-1 stops playback and resets currentTime to 0)
     if (changedProperties.has('duration') && this.duration === -1) {
       this.currentTime = 0;
       this.activeLineIndices = [];
-      this.activeMainWordIndices.clear();
-      this.activeBackgroundWordIndices.clear();
-      this.mainWordProgress.clear();
-      this.backgroundWordProgress.clear();
-      this.mainWordAnimations.clear();
-      this.backgroundWordAnimations.clear();
       this.preActiveLineElements = [];
       this.positionedLineElements = [];
       this.activeGapLineElements = [];
@@ -4402,31 +4323,15 @@ export class AmLyrics extends LitElement {
       this.setUserScrolling(false);
 
       // Cancel any running animations
-      if (this.animationFrameId) {
-        cancelAnimationFrame(this.animationFrameId);
-        this.animationFrameId = undefined;
-      }
 
       // Clear user scroll timeout
       if (this.userScrollTimeoutId) {
         clearTimeout(this.userScrollTimeoutId);
         this.userScrollTimeoutId = undefined;
       }
-      if (this.scrollUnlockTimeout) {
-        clearTimeout(this.scrollUnlockTimeout);
-        this.scrollUnlockTimeout = undefined;
-      }
-      if (this.scrollAnimationTimeout) {
-        clearTimeout(this.scrollAnimationTimeout);
-        this.scrollAnimationTimeout = undefined;
-      }
-
-      // Scroll to top
-      if (this.lyricsContainer) {
-        this.lyricsContainer.scrollTop = 0;
-      }
-
-      return; // Exit early, don't process other changes
+      this.cancelLineScrollAnimation();
+      if (this.lyricsContainer) this.lyricsContainer.scrollTop = 0;
+      return;
     }
 
     if (
@@ -4507,6 +4412,8 @@ export class AmLyrics extends LitElement {
         : null;
     if (
       nextLineElement &&
+      !this.noBlur &&
+      !this.shouldReduceMotion &&
       !this.isUserScrolling &&
       this.lyricsContainer.classList.contains('blur-inactive-enabled') &&
       !this.lyricsContainer.classList.contains('not-focused') &&
@@ -4577,9 +4484,7 @@ export class AmLyrics extends LitElement {
     }
 
     this.focusLine(targetElement, forceScroll, scrollDuration);
-    // focusLine synchronously assigns each moving line its actual staggered
-    // duration. Hand background-vocal ownership over afterwards so its exit
-    // begins in the same frame and settles with that line's scroll.
+    // Start backing-vocal transitions in the same frame as line scrolling.
     this.setBackgroundExpandedLine(targetElement);
   }
 
@@ -4645,7 +4550,6 @@ export class AmLyrics extends LitElement {
         target._cachedVirtualWordElements = undefined;
         target._cachedVirtualWordCharSpans = undefined;
         target._wordPreWipeKey = undefined;
-        target._wordWipeStarted = false;
       });
     this.lyricsContainer
       .querySelectorAll<HTMLElement>('.lyrics-syllable')
@@ -4685,6 +4589,12 @@ export class AmLyrics extends LitElement {
   }
 
   private _invalidateCaches() {
+    this.cancelLineScrollAnimation();
+    this.lyricsContainer
+      ?.querySelectorAll<HTMLElement>('.native-motion')
+      .forEach(char => AmLyrics.clearCharacterMotion(char));
+    AmLyrics.motionSyllables = new WeakMap();
+    AmLyrics.motionParameters = new WeakMap();
     this.clearProgressiveBlurLine();
     this.cachedAllGaps = [];
     this.cachedIsUnsynced = false;
@@ -4707,6 +4617,25 @@ export class AmLyrics extends LitElement {
       this.lyrics && this.lyrics.length > 0
         ? this.lyrics.every(l => l.timestamp === 0 && l.endtime === 0)
         : false;
+  }
+
+  private static characterMotionMode(
+    text: string,
+    durationMs: number,
+    background = false,
+  ): 'none' | 'rise' | 'emphasis' {
+    // Native constructor RVA 0x2f483c–0x2f48e0 and draw gate 0x2f662f.
+    // 0x2f4080 detects Chinese/Japanese; Hangul is not part of that predicate.
+    // Keep connected RTL scripts intact in the browser renderer.
+    if (/[\u0590-\u08ff]/.test(text)) return 'none';
+    const count = Array.from(text.trim()).length;
+    if (!count) return 'none';
+    if (/[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff]/.test(text)) {
+      return count > 1 ? 'rise' : 'none';
+    }
+    return !background && durationMs >= 1000 && count <= 7
+      ? 'emphasis'
+      : 'none';
   }
 
   private _ensureLineDataCache() {
@@ -4742,7 +4671,6 @@ export class AmLyrics extends LitElement {
       const groupGlowing: boolean[] = new Array(wordGroups.length).fill(false);
       const groupCharRise: boolean[] = new Array(wordGroups.length).fill(false);
       const groupCharDrag: boolean[] = new Array(wordGroups.length).fill(false);
-      const vwFullText: string[] = new Array(wordGroups.length).fill('');
       const vwFullDuration: number[] = new Array(wordGroups.length).fill(0);
       const vwCharOffset: number[] = new Array(wordGroups.length).fill(0);
       const vwStartMs: number[] = new Array(wordGroups.length).fill(0);
@@ -4769,58 +4697,27 @@ export class AmLyrics extends LitElement {
         const combinedEnd = lastGrp[lastGrp.length - 1].endtime;
         const combinedDuration = combinedEnd - combinedStart;
 
-        const isCJK =
-          /[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/.test(
-            combinedText,
-          );
-        const isRTL =
-          /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u0590-\u05FF]/.test(
-            combinedText,
-          );
+        const isRTL = /[\u0590-\u08ff]/.test(combinedText);
         if (isRTL) lineIsRTL = true;
-        const hasHyphen = combinedText.includes('-');
-
-        const wordLen = combinedText.length;
-        const canAnimateByChar = !isCJK && !isRTL && !hasHyphen && wordLen > 0;
         const isLineSynced =
           line.isWordSynced === false || line.text.some(s => s.lineSynced);
-        let isGrowableVW = canAnimateByChar && wordLen > 0 && wordLen <= 7;
-        if (isGrowableVW) {
-          if (wordLen <= 1) {
-            isGrowableVW =
-              combinedDuration >= 1100 && combinedDuration >= wordLen * 550;
-          } else if (wordLen <= 3) {
-            isGrowableVW =
-              combinedDuration >=
-              SHORT_WORD_GLOW_MIN_DURATION_MS + (wordLen - 2) * 140;
-          } else if (wordLen === 4) {
-            isGrowableVW = combinedDuration >= 1050;
-          } else {
-            isGrowableVW =
-              combinedDuration >= 900 && combinedDuration >= wordLen * 200;
-          }
-        }
-
-        const hasCharRiseDuration =
-          combinedDuration >= Math.max(1600, wordLen * 135);
-        const hasTinyWordDragDuration =
-          wordLen >= 2 &&
-          wordLen <= 3 &&
-          combinedDuration >=
-            Math.max(SHORT_WORD_DRAG_MIN_DURATION_MS, wordLen * 150);
-        const isCharRiseVW =
-          canAnimateByChar &&
-          !isLineSynced &&
-          !isGrowableVW &&
-          wordLen >= 12 &&
-          hasCharRiseDuration;
-        const isCharDragVW =
-          canAnimateByChar &&
-          !isLineSynced &&
-          !isGrowableVW &&
-          hasTinyWordDragDuration;
-
-        const isGlowingVW = isGrowableVW && !isLineSynced;
+        const modes = wordGroups
+          .slice(vwStart, vwEnd + 1)
+          .flatMap(group =>
+            group.map(syllable =>
+              isLineSynced
+                ? 'none'
+                : AmLyrics.characterMotionMode(
+                    syllable.text,
+                    syllable.endtime - syllable.timestamp,
+                    line.background,
+                  ),
+            ),
+          );
+        const isGrowableVW = modes.includes('emphasis');
+        const isCharRiseVW = modes.includes('rise');
+        const isCharDragVW = false;
+        const isGlowingVW = isGrowableVW;
 
         let charOff = 0;
         for (let gi = vwStart; gi <= vwEnd; gi += 1) {
@@ -4828,13 +4725,12 @@ export class AmLyrics extends LitElement {
           groupGlowing[gi] = isGlowingVW;
           groupCharRise[gi] = isCharRiseVW;
           groupCharDrag[gi] = isCharDragVW;
-          vwFullText[gi] = combinedText;
           vwFullDuration[gi] = combinedDuration;
           vwCharOffset[gi] = charOff;
           vwStartMs[gi] = combinedStart;
           vwEndMs[gi] = combinedEnd;
           const grpText = wordGroups[gi].map(s => s.text).join('');
-          charOff += grpText.replace(/\s/g, '').length;
+          charOff += Array.from(grpText.replace(/\s/g, '')).length;
         }
 
         vwStart = vwEnd + 1;
@@ -4846,7 +4742,6 @@ export class AmLyrics extends LitElement {
         groupGlowing,
         groupCharRise,
         groupCharDrag,
-        vwFullText,
         vwFullDuration,
         vwCharOffset,
         vwStartMs,
@@ -4860,14 +4755,6 @@ export class AmLyrics extends LitElement {
     if (!this.shadowRoot) return;
 
     this._rebuildDomCache();
-
-    // Get the computed font from the first syllable to ensure accuracy
-    const referenceSyllable = this.shadowRoot.querySelector('.lyrics-syllable');
-    if (!referenceSyllable) return;
-
-    const computedStyle = getComputedStyle(referenceSyllable);
-    const { font } = computedStyle; // Full font string
-    const fontSize = Number.parseFloat(computedStyle.fontSize) || 16;
 
     const charTimedWords = Array.from(
       this.shadowRoot.querySelectorAll(
@@ -4915,98 +4802,21 @@ export class AmLyrics extends LitElement {
         target._cachedVirtualWordCharSpans = charSpans;
       });
 
-      const syllableEntries = syllables.map(syl => {
-        const spans = (syl as any)._cachedCharSpans as HTMLElement[];
-        const charWidths = spans.map(span =>
-          this._getTextWidth(span.textContent || '', font),
+      syllables.forEach(syllable => {
+        const spans = (syllable as any)._cachedCharSpans as HTMLElement[];
+        if (!spans.length) return;
+        // Computed width is untransformed and keeps fractional CSS pixels.
+        // BoundingClientRect would include the currently running rise/scale.
+        const widths = spans.map(span =>
+          parseFloat(getComputedStyle(span).width),
         );
-        const totalWidth = charWidths.reduce((a, b) => a + b, 0);
-        return {
-          syl,
-          spans,
-          charWidths,
-          totalWidth,
-          start: parseFloat(syl.getAttribute('data-start-time') || ''),
-          end: parseFloat(syl.getAttribute('data-end-time') || ''),
-        };
-      });
-      const totalWordWidth = syllableEntries.reduce(
-        (total, entry) => total + entry.totalWidth,
-        0,
-      );
-      if (totalWordWidth <= 0) return;
-
-      const virtualWordStart = Math.min(
-        ...syllableEntries
-          .map(entry => entry.start)
-          .filter(start => Number.isFinite(start)),
-      );
-      const virtualWordEnd = Math.max(
-        ...syllableEntries
-          .map(entry => entry.end)
-          .filter(end => Number.isFinite(end)),
-      );
-      const virtualWordDuration = virtualWordEnd - virtualWordStart;
-      const hasTimedSyllables =
-        Number.isFinite(virtualWordStart) &&
-        Number.isFinite(virtualWordEnd) &&
-        virtualWordDuration > 0;
-      const wordVelocityPxPerMs = hasTimedSyllables
-        ? totalWordWidth / virtualWordDuration
-        : 0;
-      const gradientLeadWidthPx =
-        (BASE_WIPE_GRADIENT_EM * Math.max(1, fontSize)) / 2;
-      const measuredPreWipeDuration =
-        wordVelocityPxPerMs > 0
-          ? gradientLeadWidthPx / wordVelocityPxPerMs
-          : 100;
-
-      let cumulativeCharWidth = 0;
-      syllableEntries.forEach(entry => {
-        let cumulativeSyllableWidth = 0;
-        const syllableDuration = entry.end - entry.start;
-        const useSyllableTiming =
-          hasTimedSyllables &&
-          Number.isFinite(entry.start) &&
-          Number.isFinite(entry.end) &&
-          syllableDuration > 0 &&
-          entry.totalWidth > 0;
-
-        entry.spans.forEach((span, index) => {
-          const charWidth = entry.charWidths[index];
-          let startPercent = cumulativeCharWidth / totalWordWidth;
-          let durationPercent = charWidth / totalWordWidth;
-          if (useSyllableTiming) {
-            const charStartMs =
-              entry.start -
-              virtualWordStart +
-              (cumulativeSyllableWidth / entry.totalWidth) * syllableDuration;
-            const charDurationMs =
-              (charWidth / entry.totalWidth) * syllableDuration;
-            startPercent = AmLyrics.clamp(
-              charStartMs / virtualWordDuration,
-              0,
-              1,
-            );
-            durationPercent = AmLyrics.clamp(
-              charDurationMs / virtualWordDuration,
-              0,
-              1,
-            );
-          }
-          const target = span;
-
-          target.dataset.wipeStart = startPercent.toFixed(4);
-          target.dataset.wipeDuration = durationPercent.toFixed(4);
-          target.dataset.preWipeDuration = measuredPreWipeDuration.toFixed(2);
-          target.style.setProperty('--word-wipe-width', `${totalWordWidth}px`);
-          target.style.setProperty(
-            '--char-wipe-position',
-            `${-cumulativeCharWidth}px`,
-          );
-
-          cumulativeCharWidth += charWidth;
-          cumulativeSyllableWidth += charWidth;
+        const width = widths.reduce((total, value) => total + value, 0);
+        if (!Number.isFinite(width) || width <= 0) return;
+        let offset = 0;
+        spans.forEach((span, index) => {
+          span.style.setProperty('--word-wipe-width', `${width}px`);
+          span.style.setProperty('--char-wipe-position', `${-offset}px`);
+          offset += widths[index];
         });
       });
     });
@@ -5265,106 +5075,78 @@ export class AmLyrics extends LitElement {
         ? lineElement
         : null;
 
-    if (this.backgroundExpandedLine === target) {
-      if (target && !target.classList.contains('bg-expanded')) {
-        const timeoutId = this.backgroundCollapseTimeouts.get(target);
-        if (timeoutId !== undefined) clearTimeout(timeoutId);
-        this.backgroundCollapseTimeouts.delete(target);
-        target.classList.remove('bg-collapsing');
-        target.style.removeProperty('--background-vocal-exit-duration');
-        this.scheduleBackgroundExpansion(target);
-      }
-      return;
-    }
-
-    if (this.backgroundExpandFrameId !== undefined) {
-      cancelAnimationFrame(this.backgroundExpandFrameId);
-      this.backgroundExpandFrameId = undefined;
-    }
-
-    const previousLine = this.backgroundExpandedLine;
-    if (previousLine) {
-      previousLine.classList.remove('bg-expanded');
-      const oldTimeoutId = this.backgroundCollapseTimeouts.get(previousLine);
-      if (oldTimeoutId !== undefined) clearTimeout(oldTimeoutId);
-      const exitDuration = AmLyrics.getCssTimeMs(
-        previousLine,
-        '--scroll-duration',
-        AmLyrics.getCssTimeMs(
-          previousLine,
-          '--am-lyrics-background-vocal-exit-duration',
-          BACKGROUND_EXIT_DURATION_MS,
-        ),
-      );
-      previousLine.style.setProperty(
+    this.backgroundExpandedLines.forEach((timing, line) => {
+      // Keep the entire backing phrase through brief gaps and overlapping leads.
+      // It must not prevent the incoming line's backing vocals from opening.
+      if (
+        line === target ||
+        (this.currentTime >= timing.start && this.currentTime < timing.end)
+      )
+        return;
+      this.backgroundExpandedLines.delete(line);
+      line.classList.remove('bg-expanded');
+      const exitDuration = this.shouldReduceMotion
+        ? 0
+        : AmLyrics.getCssTimeMs(
+            line,
+            '--am-lyrics-background-vocal-exit-duration',
+            BACKGROUND_EXIT_DURATION_MS,
+          );
+      line.style.setProperty(
         '--background-vocal-exit-duration',
         `${exitDuration}ms`,
       );
-      previousLine.classList.add('bg-collapsing');
+      line.classList.add('bg-collapsing');
       const timeoutId = window.setTimeout(() => {
-        previousLine.classList.remove('bg-collapsing');
-        previousLine.style.removeProperty('--background-vocal-exit-duration');
-        this.backgroundCollapseTimeouts.delete(previousLine);
+        line.classList.remove('bg-collapsing');
+        line.style.removeProperty('--background-vocal-exit-duration');
+        this.backgroundCollapseTimeouts.delete(line);
       }, exitDuration);
-      this.backgroundCollapseTimeouts.set(previousLine, timeoutId);
-    }
+      this.backgroundCollapseTimeouts.set(line, timeoutId);
+    });
 
-    this.backgroundExpandedLine = target;
-    if (target) {
-      const timeoutId = this.backgroundCollapseTimeouts.get(target);
-      if (timeoutId !== undefined) clearTimeout(timeoutId);
-      this.backgroundCollapseTimeouts.delete(target);
-      target.classList.remove('bg-collapsing');
-      target.style.removeProperty('--background-vocal-exit-duration');
-      this.scheduleBackgroundExpansion(target);
-    }
+    if (!target || this.backgroundExpandedLines.has(target)) return;
+    const timeoutId = this.backgroundCollapseTimeouts.get(target);
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+    this.backgroundCollapseTimeouts.delete(target);
+    const notes = Array.from(
+      target.querySelectorAll<HTMLElement>(
+        '.background-vocal-container .lyrics-syllable',
+      ),
+    );
+    this.backgroundExpandedLines.set(target, {
+      start: Math.min(...notes.map(note => Number(note.dataset.startTime))),
+      end: Math.max(...notes.map(note => Number(note.dataset.endTime))),
+    });
+    target.classList.remove('bg-collapsing');
+    target.style.removeProperty('--background-vocal-exit-duration');
+    AmLyrics.scheduleBackgroundExpansion(target);
   }
 
-  private scheduleBackgroundExpansion(target: HTMLElement): void {
-    if (this.backgroundExpandFrameId !== undefined) return;
-
-    const backgroundVocal = target.querySelector(
-      '.background-vocal-container',
-    ) as HTMLElement | null;
-    if (!backgroundVocal) return;
-
+  private static scheduleBackgroundExpansion(target: HTMLElement): void {
+    const wrap = target.querySelector<HTMLElement>('.background-vocal-wrap');
+    if (!wrap) return;
+    // Measure natural content, never the transitioning container or scaled bounds.
+    // Padding is constant in every state, so reversals cannot accumulate spacing.
     target.style.setProperty(
       '--am-lyrics-background-vocal-height',
-      `${Math.ceil(backgroundVocal.scrollHeight + 4)}px`,
+      `${wrap.scrollHeight + 4}px`,
     );
-    target.classList.remove('bg-expanded');
-
-    // Two frames guarantee that the collapsed geometry is painted before the
-    // expansion begins, including when lyrics are first rendered mid-line.
-    this.backgroundExpandFrameId = requestAnimationFrame(() => {
-      this.backgroundExpandFrameId = requestAnimationFrame(() => {
-        this.backgroundExpandFrameId = undefined;
-        if (this.backgroundExpandedLine === target) {
-          target.classList.add('bg-expanded');
-        }
-      });
-    });
+    target.classList.add('bg-expanded');
   }
 
   private clearBackgroundExpandedLine(): void {
-    if (this.backgroundExpandFrameId !== undefined) {
-      cancelAnimationFrame(this.backgroundExpandFrameId);
-      this.backgroundExpandFrameId = undefined;
+    for (const line of this.backgroundExpandedLines.keys()) {
+      line.classList.remove('bg-expanded', 'bg-collapsing');
+      line.style.removeProperty('--background-vocal-exit-duration');
     }
-    this.backgroundExpandedLine?.classList.remove(
-      'bg-expanded',
-      'bg-collapsing',
-    );
-    this.backgroundExpandedLine?.style.removeProperty(
-      '--background-vocal-exit-duration',
-    );
     for (const [line, timeoutId] of this.backgroundCollapseTimeouts) {
       clearTimeout(timeoutId);
       line.classList.remove('bg-collapsing');
       line.style.removeProperty('--background-vocal-exit-duration');
     }
     this.backgroundCollapseTimeouts.clear();
-    this.backgroundExpandedLine = null;
+    this.backgroundExpandedLines.clear();
   }
 
   private getPrimaryActiveLineIndex(activeIndices: number[]): number | null {
@@ -5711,156 +5493,6 @@ export class AmLyrics extends LitElement {
     return gaps;
   }
 
-  private startAnimationFromTime(time: number) {
-    if (this.animationFrameId) {
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = undefined;
-    }
-
-    if (!this.lyrics) return;
-
-    const activeLineIndices = this.findActiveLineIndices(time);
-    if (!AmLyrics.arraysEqual(activeLineIndices, this.activeLineIndices)) {
-      this.activeLineIndices = activeLineIndices;
-    }
-
-    // Clear previous state
-    this.activeMainWordIndices.clear();
-    this.activeBackgroundWordIndices.clear();
-    this.mainWordAnimations.clear();
-    this.backgroundWordAnimations.clear();
-    this.mainWordProgress.clear();
-    this.backgroundWordProgress.clear();
-
-    if (activeLineIndices.length === 0) {
-      return;
-    }
-
-    // Set up animations for each active line
-    for (const lineIndex of activeLineIndices) {
-      const line = this.lyrics[lineIndex];
-
-      // Find main word based on the reset time
-      let mainWordIdx = -1;
-      for (let i = 0; i < line.text.length; i += 1) {
-        if (time >= line.text[i].timestamp && time <= line.text[i].endtime) {
-          mainWordIdx = i;
-          break;
-        }
-      }
-      this.activeMainWordIndices.set(lineIndex, mainWordIdx);
-
-      // Find background word based on the reset time
-      let backWordIdx = -1;
-      if (line.backgroundText) {
-        for (let i = 0; i < line.backgroundText.length; i += 1) {
-          if (
-            time >= line.backgroundText[i].timestamp &&
-            time <= line.backgroundText[i].endtime
-          ) {
-            backWordIdx = i;
-            break;
-          }
-        }
-      }
-      this.activeBackgroundWordIndices.set(lineIndex, backWordIdx);
-    }
-
-    // With the state correctly set, configure the animation parameters
-    this.setupAnimations();
-
-    // Start the animation loop
-    if (this.interpolate) {
-      this.animateProgress();
-    }
-  }
-
-  private updateActiveLineAndWords() {
-    if (!this.lyrics) return;
-
-    const activeLineIndices = this.findActiveLineIndices(this.currentTime);
-    if (!AmLyrics.arraysEqual(activeLineIndices, this.activeLineIndices)) {
-      this.activeLineIndices = activeLineIndices;
-    }
-
-    // Clear previous state
-    this.activeMainWordIndices.clear();
-    this.activeBackgroundWordIndices.clear();
-
-    for (const lineIdx of activeLineIndices) {
-      const line = this.lyrics[lineIdx];
-      let mainWordIdx = -1;
-      for (let i = 0; i < line.text.length; i += 1) {
-        if (
-          this.currentTime >= line.text[i].timestamp &&
-          this.currentTime <= line.text[i].endtime
-        ) {
-          mainWordIdx = i;
-          break;
-        }
-      }
-      this.activeMainWordIndices.set(lineIdx, mainWordIdx);
-
-      let backWordIdx = -1;
-      if (line.backgroundText) {
-        for (let i = 0; i < line.backgroundText.length; i += 1) {
-          if (
-            this.currentTime >= line.backgroundText[i].timestamp &&
-            this.currentTime <= line.backgroundText[i].endtime
-          ) {
-            backWordIdx = i;
-            break;
-          }
-        }
-      }
-      this.activeBackgroundWordIndices.set(lineIdx, backWordIdx);
-    }
-  }
-
-  private setupAnimations() {
-    if (this.activeLineIndices.length === 0 || !this.lyrics) {
-      this.mainWordAnimations.clear();
-      this.backgroundWordAnimations.clear();
-      return;
-    }
-
-    for (const lineIndex of this.activeLineIndices) {
-      const line = this.lyrics[lineIndex];
-      const mainWordIndex = this.activeMainWordIndices.get(lineIndex) ?? -1;
-      const backgroundWordIndex =
-        this.activeBackgroundWordIndices.get(lineIndex) ?? -1;
-
-      // Main word animation
-      if (mainWordIndex !== -1) {
-        const word = line.text[mainWordIndex];
-        const wordDuration = word.endtime - word.timestamp;
-        const elapsedInWord = this.currentTime - word.timestamp;
-        this.mainWordAnimations.set(lineIndex, {
-          startTime: performance.now() - elapsedInWord,
-          duration: wordDuration,
-        });
-      } else {
-        this.mainWordAnimations.set(lineIndex, { startTime: 0, duration: 0 });
-      }
-
-      // Background word animation
-      if (backgroundWordIndex !== -1 && line.backgroundText) {
-        const word = line.backgroundText[backgroundWordIndex];
-        const wordDuration = word.endtime - word.timestamp;
-        const elapsedInWord = this.currentTime - word.timestamp;
-        this.backgroundWordAnimations.set(lineIndex, {
-          startTime: performance.now() - elapsedInWord,
-          duration: wordDuration,
-        });
-      } else {
-        this.backgroundWordAnimations.set(lineIndex, {
-          startTime: 0,
-          duration: 0,
-        });
-      }
-    }
-  }
-
   private handleLineClick(line: LyricsLine) {
     if (this.cachedIsUnsynced) return;
 
@@ -5878,19 +5510,9 @@ export class AmLyrics extends LitElement {
       this.lyricsContainer.classList.remove('wheel-scrolling');
     }
 
-    // Cancel any ongoing scroll animations
-    if (this.scrollAnimationState) {
-      this.scrollAnimationState.isAnimating = false;
-      this.scrollAnimationState.pendingUpdate = null;
-      this.scrollAnimationState.pendingReferenceElement = null;
-      this.scrollAnimationState.pendingScrollDuration = undefined;
-    }
+    this.cancelLineScrollAnimation();
 
     // Clear scroll animation timeouts
-    if (this.scrollAnimationTimeout) {
-      clearTimeout(this.scrollAnimationTimeout);
-      this.scrollAnimationTimeout = undefined;
-    }
 
     // Also clear user scroll timeout to prevent stale scrollToActiveLine
     if (this.userScrollTimeoutId) {
@@ -5903,7 +5525,7 @@ export class AmLyrics extends LitElement {
     this.currentPrimaryActiveLine = null;
     this.lastPrimaryActiveLine = null;
     this.activeLineIds.clear();
-    this.animatingLines = [];
+
     this.setBackgroundExpandedLine(null);
 
     // Find the clicked line element and scroll to it with forceScroll (like YouLyPlus)
@@ -6050,251 +5672,156 @@ export class AmLyrics extends LitElement {
     return result;
   }
 
-  /**
-   * Animate scroll with staggered delay for smooth YouLyPlus-style scrolling
-   */
+  private cancelLineScrollAnimation(): void {
+    this.lineSprings.forEach((spring, line) => {
+      spring.animation.cancel();
+      line.style.removeProperty('will-change');
+    });
+    this.lineSprings.clear();
+  }
+
+  private lineSprings = new Map<
+    HTMLElement,
+    {
+      animation: Animation;
+      position: number;
+      velocity: number;
+      delay: number;
+      frequency: number;
+    }
+  >();
+
+  private static sampleSpring(
+    position: number,
+    velocity: number,
+    time: number,
+    frequency: number,
+    damping = 0.9 * frequency,
+  ): { position: number; velocity: number } {
+    const omega = Math.sqrt(frequency * frequency - damping * damping);
+    const decay = Math.exp(-damping * time);
+    const cos = Math.cos(omega * time);
+    const sin = Math.sin(omega * time);
+    return {
+      position:
+        decay *
+        (position * cos + ((velocity + damping * position) / omega) * sin),
+      velocity:
+        decay *
+        (velocity * cos -
+          ((damping * velocity + frequency * frequency * position) / omega) *
+            sin),
+    };
+  }
+
   private animateScrollYouLy(
     newTranslateY: number,
-    forceScroll = false,
-    scrollDuration: number | undefined = undefined,
+    forceScroll?: boolean,
+    _scrollDuration?: number,
     referenceElement: HTMLElement | null = null,
   ): void {
     if (!this.lyricsContainer) return;
     const parent = this.lyricsContainer;
-    const maxScrollTop = Math.max(0, parent.scrollHeight - parent.clientHeight);
-    const targetTop = AmLyrics.clamp(-newTranslateY, 0, maxScrollTop);
-
-    if (!this.scrollAnimationState) {
-      this.scrollAnimationState = {
-        isAnimating: false,
-        pendingUpdate: null,
-        pendingReferenceElement: null,
-        pendingScrollDuration: undefined,
-      };
-      this.animatingLines = [];
-    }
-
-    const animState = this.scrollAnimationState;
-
-    if (animState.isAnimating && !forceScroll) {
-      const pendingTop =
-        animState.pendingUpdate === null
-          ? null
-          : Math.max(0, -animState.pendingUpdate);
-      if (
-        Math.abs(parent.scrollTop - targetTop) < 2 ||
-        (pendingTop !== null && Math.abs(pendingTop - targetTop) < 2)
-      ) {
-        return;
-      }
-      animState.pendingUpdate = newTranslateY;
-      animState.pendingReferenceElement = referenceElement;
-      animState.pendingScrollDuration = scrollDuration;
+    const currentTop = parent.scrollTop;
+    const requestedDelta = -newTranslateY - currentTop;
+    if (this.shouldReduceMotion || this.lineMotion === 'instant') {
+      this.cancelLineScrollAnimation();
+      parent.scrollTop = Math.max(0, -newTranslateY);
+      this.currentScrollOffset = -parent.scrollTop;
       return;
     }
-
-    if (this.scrollAnimationTimeout) {
-      clearTimeout(this.scrollAnimationTimeout);
-      this.scrollAnimationTimeout = undefined;
-    }
-    if (this.scrollUnlockTimeout) {
-      clearTimeout(this.scrollUnlockTimeout);
-      this.scrollUnlockTimeout = undefined;
-    }
-
-    const { animatingLines } = this;
-
-    const appliedTranslateY = -targetTop;
-    // Safari can expose negative or beyond-the-end scrollTop values during
-    // elastic overscroll. Never feed those transient values into the visual
-    // line offset, or the whole stack can animate past the viewport edge.
-    const currentTop = AmLyrics.clamp(parent.scrollTop, 0, maxScrollTop);
-    const prevOffset = -currentTop;
-    const delta = prevOffset - appliedTranslateY;
-    const maxVisualDelta = Math.max(120, parent.clientHeight * 0.75);
-    const visualDelta = AmLyrics.clamp(delta, -maxVisualDelta, maxVisualDelta);
-    this.currentScrollOffset = appliedTranslateY;
-
-    // Skip animation if already at the target position (e.g., first lines at top)
-    if (Math.abs(currentTop - targetTop) < 1 && Math.abs(delta) < 1) {
-      animState.isAnimating = false;
-      animState.pendingUpdate = null;
-      animState.pendingReferenceElement = null;
-      animState.pendingScrollDuration = undefined;
-      return;
-    }
-
-    if (forceScroll) {
-      // Clean up any lingering scroll animations before smooth scroll
-      for (const line of animatingLines) {
-        line.classList.remove('scroll-animate');
-        line.style.removeProperty('--scroll-delta');
-        line.style.removeProperty('--lyrics-line-delay');
-        line.style.removeProperty('--scroll-duration');
-      }
-      animatingLines.length = 0;
-      parent.scrollTo({ top: targetTop, behavior: 'smooth' });
-      animState.isAnimating = false;
-      animState.pendingUpdate = null;
-      animState.pendingReferenceElement = null;
-      animState.pendingScrollDuration = undefined;
-      return;
-    }
-
-    // --- Step 1: Remove scroll-animate and custom properties from ALL
-    // previously animating lines so stale deltas don't interfere. ---
-    for (const line of animatingLines) {
-      line.classList.remove('scroll-animate');
-      line.style.removeProperty('--scroll-delta');
-      line.style.removeProperty('--lyrics-line-delay');
-      line.style.removeProperty('--scroll-duration');
-    }
-    animatingLines.length = 0;
-
-    // Get lines for staggered animation — use cached array
-    if (this.cachedLineArray.length === 0) {
-      const lineElements =
-        this.lyricsContainer.querySelectorAll('.lyrics-line');
-      this.cachedLineArray = Array.from(lineElements) as HTMLElement[];
-    }
-    const lineArray = this.cachedLineArray;
-
-    const referenceLine =
-      referenceElement ||
-      this.currentPrimaryActiveLine ||
-      this.lastPrimaryActiveLine ||
-      lineArray[0];
-
-    if (!referenceLine) return;
-
-    const referenceIndex = lineArray.indexOf(referenceLine);
-    if (referenceIndex === -1) return;
-
-    const duration = Math.min(
-      450,
-      scrollDuration ?? SCROLL_ANIMATION_DURATION_MS,
+    if (Math.abs(requestedDelta) < 0.5) return;
+    const lines = Array.from(
+      parent.querySelectorAll<HTMLElement>('.lyrics-line'),
     );
-    const delayIncrement = duration * 0.1;
-    const maxStaggerSteps = 4;
-    const lookAhead = 20;
-    const len = lineArray.length;
-
-    const start = Math.max(0, referenceIndex - lookAhead);
-    const end = Math.min(len, referenceIndex + lookAhead);
-
-    let maxAnimationDuration = 0;
-    const newAnimatingLines: HTMLElement[] = [];
-    const lineDelays = new Map<HTMLElement, number>();
-    const scrollingDown = delta >= 0;
-
-    if (scrollingDown) {
-      let delayCounter = 0;
-      for (let i = start; i < end; i += 1) {
-        const line = lineArray[i];
-        const delay =
-          i >= referenceIndex
-            ? Math.min(delayCounter, maxStaggerSteps) * delayIncrement
-            : 0;
-
-        if (i >= referenceIndex && !line.classList.contains('lyrics-gap')) {
-          delayCounter += 1;
-        }
-
-        line.style.setProperty('--scroll-delta', `${visualDelta}px`);
-        line.style.setProperty('--lyrics-line-delay', `${delay}ms`);
-        lineDelays.set(line, delay);
-
-        newAnimatingLines.push(line);
-
-        const lineDuration = duration + 100 + delay;
-        if (lineDuration > maxAnimationDuration) {
-          maxAnimationDuration = lineDuration;
-        }
-      }
-    } else {
-      let delayCounter = 0;
-      for (let i = end - 1; i >= start; i -= 1) {
-        const line = lineArray[i];
-        const delay =
-          i <= referenceIndex
-            ? Math.min(delayCounter, maxStaggerSteps) * delayIncrement
-            : 0;
-
-        if (i <= referenceIndex && !line.classList.contains('lyrics-gap')) {
-          delayCounter += 1;
-        }
-
-        line.style.setProperty('--scroll-delta', `${visualDelta}px`);
-        line.style.setProperty('--lyrics-line-delay', `${delay}ms`);
-        lineDelays.set(line, delay);
-
-        newAnimatingLines.push(line);
-
-        const lineDuration = duration + 100 + delay;
-        if (lineDuration > maxAnimationDuration) {
-          maxAnimationDuration = lineDuration;
-        }
-      }
-    }
-
-    /* Preserve the staggered starts, but make every line settle together.
-       This keeps the selected line from drifting after its neighbours. */
-    for (const line of newAnimatingLines) {
-      const delay = lineDelays.get(line) ?? 0;
-      line.style.setProperty(
-        '--scroll-duration',
-        `${Math.max(100, maxAnimationDuration - delay)}ms`,
-      );
-    }
-
-    // Commit the real scroll position before starting the visual FLIP. Unlike
-    // scrollTo({ behavior: 'instant' }), assigning scrollTop is synchronous in
-    // WebKit, so Safari cannot paint an intermediate frame above the viewport.
-    parent.scrollTop = targetTop;
-
-    // --- Step 3: Force reflow so the browser sees the class removal and the
-    // synchronous scroll position before the animation begins. ---
-    // Use offsetHeight which is cheaper than getBoundingClientRect.
-    // eslint-disable-next-line no-void
-    void parent.offsetHeight;
-
-    // --- Step 4: Re-add scroll-animate class to start fresh animations ---
-    for (const line of newAnimatingLines) {
-      line.classList.add('scroll-animate');
-      animatingLines.push(line);
-    }
-
-    animState.isAnimating = true;
-
-    this.scrollUnlockTimeout = setTimeout(() => {
-      animState.isAnimating = false;
-      if (animState.pendingUpdate !== null) {
-        const pendingValue = animState.pendingUpdate;
-        const pendingReference = animState.pendingReferenceElement;
-        const pendingDuration = animState.pendingScrollDuration;
-        animState.pendingUpdate = null;
-        animState.pendingReferenceElement = null;
-        animState.pendingScrollDuration = undefined;
-        this.animateScrollYouLy(
-          pendingValue,
-          false,
-          pendingDuration,
-          pendingReference,
-        );
-      }
-    }, maxAnimationDuration);
-
-    this.scrollAnimationTimeout = setTimeout(() => {
-      for (let i = 0; i < animatingLines.length; i += 1) {
-        const line = animatingLines[i];
-        line.classList.remove('scroll-animate');
-        line.style.removeProperty('--scroll-delta');
-        line.style.removeProperty('--lyrics-line-delay');
-        line.style.removeProperty('--scroll-duration');
-      }
-      animatingLines.length = 0;
-      this.scrollAnimationTimeout = undefined;
-    }, maxAnimationDuration + 50);
+    const reference = lines.indexOf(
+      referenceElement || this.currentPrimaryActiveLine || lines[0],
+    );
+    // LyricsBlossom's published line spring: mass 1, stiffness 100,
+    // damping 18. Predictive look-ahead is not a playback-speed multiplier.
+    const frequency = 10;
+    // Sample the analytic spring once. The compositor advances translation;
+    // playback work, lyric painting and JS frame scheduling cannot hold it up.
+    // Read all current poses before cancelling anything or changing scrollTop.
+    const poses = lines.map((line, index) => {
+      const previous = this.lineSprings.get(line);
+      const age = previous
+        ? Math.max(
+            0,
+            Number(previous.animation.currentTime || 0) / 1000 - previous.delay,
+          )
+        : 0;
+      const pose = previous
+        ? AmLyrics.sampleSpring(
+            previous.position,
+            previous.velocity,
+            age,
+            previous.frequency,
+          )
+        : { position: 0, velocity: 0 };
+      const steps = requestedDelta > 0 ? index - reference : reference - index;
+      return {
+        line,
+        index,
+        position: pose.position,
+        velocity: pose.velocity,
+        delay:
+          previous || forceScroll || this.lineMotion === 'uniform'
+            ? 0
+            : Math.max(0, Math.min(4, steps)) * 0.05,
+      };
+    });
+    this.cancelLineScrollAnimation();
+    // Animated translation contributes to scrollHeight. Measure the real
+    // range only after removing it, or retargeting near the bottom jumps.
+    const target = AmLyrics.clamp(
+      -newTranslateY,
+      0,
+      Math.max(0, parent.scrollHeight - parent.clientHeight),
+    );
+    const delta = target - currentTop;
+    parent.scrollTop = target;
+    this.currentScrollOffset = -target;
+    poses.forEach(
+      ({ line, index, position: previousPosition, velocity, delay }) => {
+        const position = previousPosition + delta;
+        if (Math.abs(index - reference) > 20) return;
+        const duration = 1.2;
+        const frames = Array.from({ length: 97 }, (_, frame) => {
+          const offset = frame / 96;
+          const y =
+            frame === 96
+              ? 0
+              : AmLyrics.sampleSpring(
+                  position,
+                  velocity,
+                  duration * offset,
+                  frequency,
+                ).position;
+          return { offset, translate: `0 ${y}px` };
+        });
+        line.style.setProperty('will-change', 'translate');
+        const animation = line.animate(frames, {
+          duration: duration * 1000,
+          delay: delay * 1000,
+          fill: 'both',
+          easing: 'linear',
+        });
+        this.lineSprings.set(line, {
+          animation,
+          position,
+          velocity,
+          delay,
+          frequency,
+        });
+        animation.onfinish = () => {
+          if (this.lineSprings.get(line)?.animation !== animation) return;
+          animation.cancel();
+          line.style.removeProperty('will-change');
+          this.lineSprings.delete(line);
+        };
+      },
+    );
   }
 
   /**
@@ -6416,7 +5943,12 @@ export class AmLyrics extends LitElement {
       this.isProgrammaticScroll = false;
     }, duration + 160);
 
-    this.animateScrollYouLy(targetTranslateY, forceScroll, scrollDuration);
+    this.animateScrollYouLy(
+      targetTranslateY,
+      forceScroll,
+      scrollDuration,
+      activeLine,
+    );
   }
 
   /**
@@ -6466,9 +5998,7 @@ export class AmLyrics extends LitElement {
       }
 
       if (!span.style.getPropertyValue('--char-wipe-position')) {
-        const startPct = Number.parseFloat(
-          span.dataset.wipeStart || `${index / Math.max(1, charSpans.length)}`,
-        );
+        const startPct = index / Math.max(1, charSpans.length);
         span.style.setProperty(
           '--char-wipe-position',
           `${-(AmLyrics.clamp(startPct, 0, 1) * approxWidthCh)}ch`,
@@ -6695,14 +6225,10 @@ export class AmLyrics extends LitElement {
     const renderedSyllables =
       wordSyllables.length > 0 ? wordSyllables : [syllable];
     const wordElement = AmLyrics.getWordElementForSyllable(syllable);
-    if (
-      AmLyrics.getCachedVirtualWordElements(wordElement).some(element =>
-        element.classList.contains('char-rise'),
-      )
-    ) {
-      return 0;
-    }
     const charSpans = AmLyrics.getCachedVirtualWordCharSpans(wordElement, []);
+    // The shared character sweep starts transparent at the segment's timestamp.
+    // A separate lead-glyph pre-wipe would flash and then restart that edge.
+    if (charSpans.length > 0) return 0;
     const charCount =
       charSpans.length ||
       renderedSyllables.reduce(
@@ -6861,235 +6387,24 @@ export class AmLyrics extends LitElement {
     const hadPreHighlight = classList.contains('pre-highlight');
     const isRTL = classList.contains('rtl-text');
     const charSpans = AmLyrics.getCachedCharSpans(syllable);
-    const wordElement = syllable.parentElement?.parentElement; // syllable-wrap -> word
-    const typedWordElement = wordElement as HTMLElement | undefined;
-    const allWordElements =
-      AmLyrics.getCachedVirtualWordElements(typedWordElement);
-    const allWordCharSpans = AmLyrics.getCachedVirtualWordCharSpans(
-      typedWordElement,
-      charSpans,
-    );
-    const isGrowable = typedWordElement?.classList.contains('growable');
-    const isCharRise = typedWordElement?.classList.contains('char-rise');
-    const isCharDrag = typedWordElement?.classList.contains('char-drag');
     const isFirstSyllable =
       syllable.getAttribute('data-syllable-index') === '0';
-    const syllableStartMs = parseFloat(
-      syllable.getAttribute('data-start-time') || '0',
-    );
-    const virtualWordStartMs = parseFloat(
-      typedWordElement?.dataset.virtualWordStart || '',
-    );
-    const isFirstInVirtualWord =
-      isFirstSyllable &&
-      (!Number.isFinite(virtualWordStartMs) ||
-        Math.abs(syllableStartMs - virtualWordStartMs) < 0.5);
     const isFirstInContainer = isFirstSyllable; // Simplified
     const isGap = syllable.closest('.lyrics-gap') !== null;
 
     // Get duration from data attribute
     const syllableDurationMs =
       parseFloat(syllable.getAttribute('data-duration') || '0') || 300;
-    const wordDurationMs =
-      parseFloat(
-        syllable.getAttribute('data-word-duration') ||
-          syllable.getAttribute('data-duration') ||
-          '0',
-      ) || syllableDurationMs;
-    const wordElapsedTimeMs = Number.isFinite(virtualWordStartMs)
-      ? elapsedTimeMs + (syllableStartMs - virtualWordStartMs)
-      : elapsedTimeMs;
-    const charWipeDurationMs = Math.max(wordDurationMs, syllableDurationMs);
-
     const charAnimationsMap = new Map<HTMLElement, string>();
-    const styleUpdates: Array<{
-      element: HTMLElement;
-      property: string;
-      value: string;
-    }> = [];
-
-    // Step 1: Grow Pass
-    if (isGrowable && isFirstInVirtualWord && allWordCharSpans.length > 0) {
-      const finalDuration = wordDurationMs;
-      const baseDelayPerChar = finalDuration * 0.09;
-      const growDurationMs = finalDuration * 1.5;
-
-      allWordCharSpans.forEach(span => {
-        const matrixScale = span.dataset.matrixScale || '1.1';
-        const charOffsetX = span.dataset.charOffsetX || '0';
-        const shadowIntensity = span.dataset.shadowIntensity || '0.6';
-        const translateYPeak = span.dataset.translateYPeak || '-2';
-
-        const syllableCharIndex = parseFloat(
-          span.dataset.syllableCharIndex || '0',
-        );
-        const growDelay = baseDelayPerChar * syllableCharIndex;
-
-        charAnimationsMap.set(
-          span,
-          `grow-dynamic ${growDurationMs}ms ease-in-out ${growDelay}ms forwards`,
-        );
-
-        styleUpdates.push({
-          element: span,
-          property: '--matrix-scale',
-          value: matrixScale,
-        });
-        styleUpdates.push({
-          element: span,
-          property: '--char-offset-x',
-          value: `${charOffsetX}px`,
-        });
-        styleUpdates.push({
-          element: span,
-          property: '--shadow-intensity',
-          value: shadowIntensity,
-        });
-        styleUpdates.push({
-          element: span,
-          property: '--translate-y-peak',
-          value: `${translateYPeak}px`,
-        });
-      });
-    }
-
-    if (isCharRise && isFirstInVirtualWord && allWordCharSpans.length > 0) {
-      const finalDuration = Math.max(wordDurationMs, syllableDurationMs);
-      const baseDelayPerChar = finalDuration * 0.06;
-      const riseDurationMs = finalDuration * 1.2;
-
-      allWordCharSpans.forEach(span => {
-        const charIndex = parseFloat(span.dataset.syllableCharIndex || '0');
-        const riseDelay = baseDelayPerChar * charIndex;
-        charAnimationsMap.set(
-          span,
-          `rise-char ${riseDurationMs}ms ease-in-out ${riseDelay}ms forwards`,
-        );
-      });
-    }
-
-    if (isCharDrag && isFirstInVirtualWord && allWordCharSpans.length > 0) {
-      const finalDuration = Math.max(wordDurationMs, syllableDurationMs);
-      const baseDelayPerChar = AmLyrics.clamp(finalDuration * 0.15, 64, 118);
-      const dragDurationMs = AmLyrics.clamp(finalDuration * 0.82, 560, 900);
-
-      allWordCharSpans.forEach(span => {
-        const charIndex = parseFloat(span.dataset.syllableCharIndex || '0');
-        const dragDelay = baseDelayPerChar * charIndex;
-
-        charAnimationsMap.set(
-          span,
-          `drag-char ${dragDurationMs}ms ease ${dragDelay}ms forwards`,
-        );
-      });
-    }
-
-    // Step 2: Wipe Pass
     if (charSpans.length > 0) {
-      const wipeCharCount =
-        allWordCharSpans.length ||
-        charSpans.length ||
-        AmLyrics.getVisibleCharacterCount(syllable);
-      const wipeScale = AmLyrics.getLongWordWipeScale(wipeCharCount);
-      AmLyrics.applyWipeShape(syllable, wipeCharCount);
-      AmLyrics.ensureWordWipeGeometry(allWordCharSpans, wipeCharCount);
-      allWordCharSpans.forEach(span =>
-        AmLyrics.applyWipeShape(span, wipeCharCount),
-      );
-
-      const hasWordLevelWipe =
-        !isFirstInVirtualWord &&
-        (Boolean((typedWordElement as any)?._wordWipeStarted) ||
-          allWordCharSpans.some(span => span.style.animation.includes('wipe')));
-      let charSpansToAnimate = charSpans;
-      if (isFirstInVirtualWord) {
-        charSpansToAnimate = allWordCharSpans;
-      } else if (hasWordLevelWipe) {
-        charSpansToAnimate = [];
-      }
-
-      if (charSpansToAnimate.length > 0 && allWordElements.length > 0) {
-        allWordElements.forEach(element => {
-          const target = element as any;
-          target._wordWipeStarted = true;
-          target._wordPreWipeKey = undefined;
-        });
-      }
-
-      charSpansToAnimate.forEach((span, charIndex) => {
-        const startPct = parseFloat(span.dataset.wipeStart || '0');
-        const durationPct = parseFloat(span.dataset.wipeDuration || '0');
-        const globalCharIndex = parseFloat(
-          span.dataset.syllableCharIndex || `${charIndex}`,
-        );
-
-        const hadCharPreWipe =
-          span.classList.contains('pre-wipe-lead') ||
-          (hadPreHighlight && globalCharIndex === 0);
-        const charStartMs = charWipeDurationMs * startPct;
-        const remainingWordWipeMs = Math.max(
-          0,
-          charWipeDurationMs - charStartMs,
-        );
-        const wipeDelay = charStartMs - wordElapsedTimeMs;
-        const wipeDuration = Math.min(
-          charWipeDurationMs * durationPct * wipeScale,
-          remainingWordWipeMs,
-        );
-        const useStartAnimation =
-          isFirstInContainer && globalCharIndex === 0 && !hadCharPreWipe;
-        let charWipeAnimation = 'char-wipe';
-        if (hadCharPreWipe) {
-          charWipeAnimation = 'char-wipe';
-        } else if (useStartAnimation) {
-          charWipeAnimation = 'char-start-wipe';
-        }
-
-        const existingAnimation =
-          charAnimationsMap.get(span) || span.style.animation || '';
-
-        const animationParts = [];
-
-        if (
-          existingAnimation &&
-          (existingAnimation.includes('grow-dynamic') ||
-            existingAnimation.includes('rise-char') ||
-            existingAnimation.includes('drag-char'))
-        ) {
-          animationParts.push(existingAnimation.split(',')[0].trim());
-        }
-        if (
-          globalCharIndex > 0 &&
-          !hadCharPreWipe &&
-          wipeDelay > 0 &&
-          wipeDuration > 0
-        ) {
-          const measuredDuration = Number.parseFloat(
-            span.dataset.preWipeDuration || '100',
-          );
-          const preWipeDuration = Math.min(
-            measuredDuration,
-            wipeDuration * 0.9,
-            charWipeDurationMs * 0.08,
-            wipeDelay,
-          );
-
-          if (preWipeDuration >= 16) {
-            animationParts.push(
-              `char-pre-wipe ${preWipeDuration}ms linear ${wipeDelay - preWipeDuration}ms none`,
-            );
-          }
-        }
-        if (wipeDuration > 0) {
-          const wipeFillMode = hadCharPreWipe ? 'both' : 'forwards';
-          animationParts.push(
-            `${charWipeAnimation} ${wipeDuration}ms linear ${wipeDelay}ms ${wipeFillMode}`,
-          );
-        }
-
-        if (animationParts.length > 0) {
-          charAnimationsMap.set(span, animationParts.join(', '));
-        }
+      // Every glyph receives the same clock and moving edge. Only its fixed
+      // sampling offset differs. Keep explicit syllable timing for joined words.
+      AmLyrics.applyWipeShape(syllable, charSpans.length);
+      AmLyrics.ensureWordWipeGeometry(charSpans, charSpans.length);
+      const animation = `char-word-wipe ${syllableDurationMs}ms linear ${-elapsedTimeMs}ms both`;
+      charSpans.forEach(span => {
+        AmLyrics.applyWipeShape(span, charSpans.length);
+        charAnimationsMap.set(span, animation);
       });
     } else {
       // Syllable-level wipe for regular (non-growable) words without chars
@@ -7118,23 +6433,19 @@ export class AmLyrics extends LitElement {
       syllable.style.animation = `${currentWipeAnimation} ${visualDuration}ms ${isGap ? 'ease-out' : 'linear'} ${-elapsedTimeMs}ms forwards`;
     }
 
-    // --- WRITE PHASE ---
-    if (allWordElements.length > 0) {
-      allWordElements.forEach(element => {
-        const target = element as any;
-        target._wordPreWipeKey = undefined;
-      });
-    }
+    AmLyrics.getCachedVirtualWordElements(
+      AmLyrics.getWordElementForSyllable(syllable),
+    ).forEach(element => {
+      const target = element as any;
+      target._wordPreWipeKey = undefined;
+    });
 
     classList.remove('pre-highlight');
     classList.add('highlight');
-    allWordCharSpans.forEach(span => AmLyrics.clearPreWipeLead(span));
+    charSpans.forEach(span => AmLyrics.clearPreWipeLead(span));
 
     // Apply keyframe variables before assigning animation strings so the
     // first painted frame never uses fallback transform values.
-    for (const update of styleUpdates) {
-      update.element.style.setProperty(update.property, update.value);
-    }
 
     for (const [span, animationString] of charAnimationsMap.entries()) {
       span.style.willChange = 'transform';
@@ -7163,6 +6474,7 @@ export class AmLyrics extends LitElement {
     for (let i = 0; i < charSpans.length; i += 1) {
       const el = charSpans[i] as HTMLElement;
       el.style.animation = '';
+      AmLyrics.clearCharacterMotion(el);
       el.style.transition = 'none';
       el.style.backgroundColor = 'var(--lyplus-text-secondary)';
       AmLyrics.clearPreWipeLead(el);
@@ -7182,7 +6494,6 @@ export class AmLyrics extends LitElement {
     wordElements.forEach(wordElement => {
       const target = wordElement as any;
       target._wordPreWipeKey = undefined;
-      target._wordWipeStarted = false;
     });
   }
 
@@ -7238,6 +6549,7 @@ export class AmLyrics extends LitElement {
       for (let j = 0; j < chars.length; j += 1) {
         const el = chars[j] as HTMLElement;
         el.style.animation = '';
+        AmLyrics.clearCharacterMotion(el);
         el.style.removeProperty('will-change');
         el.style.removeProperty('background-color');
         el.style.removeProperty('transition');
@@ -7301,23 +6613,7 @@ export class AmLyrics extends LitElement {
         const chars = syllable.querySelectorAll('span.char');
         for (let ci = 0; ci < chars.length; ci += 1) {
           const charEl = chars[ci] as HTMLElement;
-          const currentAnim = charEl.style.animation || '';
-          if (
-            currentAnim.includes('grow-dynamic') ||
-            currentAnim.includes('rise-char') ||
-            currentAnim.includes('drag-char')
-          ) {
-            const parts = currentAnim.split(',').map(p => p.trim());
-            const transformAnim = parts.find(
-              p =>
-                p.includes('grow-dynamic') ||
-                p.includes('rise-char') ||
-                p.includes('drag-char'),
-            );
-            charEl.style.animation = transformAnim || '';
-          } else {
-            charEl.style.animation = '';
-          }
+          charEl.style.animation = '';
           charEl.style.backgroundColor = 'var(--lyplus-text-primary)';
           AmLyrics.clearPreWipeLead(charEl);
         }
@@ -7335,10 +6631,158 @@ export class AmLyrics extends LitElement {
    * Update syllables based on current time
    * Uses DOM caching and pre-highlight reset for smooth transitions
    */
+  private static motionSyllables = new WeakMap<HTMLElement, HTMLElement[]>();
+
+  private static motionParameters = new WeakMap<
+    HTMLElement,
+    {
+      chars: HTMLElement[];
+      duration: number;
+      start: number;
+      cjk: boolean;
+    }
+  >();
+
+  // Repeated syllable durations share sampled curves; bound memory across songs.
+  private static characterFrames = new Map<
+    string,
+    Array<{ offset: number; transform: string; textShadow?: string }>
+  >();
+
+  private static characterAnimations = new WeakMap<
+    HTMLElement,
+    { animation: Animation; end: number; key: object }
+  >();
+
+  private static clearCharacterMotion(char: HTMLElement): void {
+    const entry = AmLyrics.characterAnimations.get(char);
+    if (!entry) return;
+    entry.animation.cancel();
+    AmLyrics.characterAnimations.delete(char);
+    char.classList.remove('native-motion');
+  }
+
+  private static updateCharacterMotion(
+    line: HTMLElement,
+    timeMs: number,
+  ): void {
+    // Timing VM RVA 0x34722d0, emphasis VM 0x34723b0; CJK rise spring
+    // mass 1, stiffness 14, damping 7 in 0x2f4e46 / 0x2f510b.
+    let syllables = AmLyrics.motionSyllables.get(line);
+    if (!syllables) {
+      syllables = Array.from(
+        line.querySelectorAll<HTMLElement>('.lyrics-syllable.has-chars'),
+      );
+      AmLyrics.motionSyllables.set(line, syllables);
+    }
+    syllables.forEach(syllable => {
+      let parameters = AmLyrics.motionParameters.get(syllable);
+      if (!parameters) {
+        parameters = {
+          chars: AmLyrics.getCachedCharSpans(syllable),
+          duration: Math.max(0.001, Number(syllable.dataset.duration) / 1000),
+          start: Number(syllable.dataset.startTime),
+          cjk: /[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff]/.test(
+            syllable.textContent || '',
+          ),
+        };
+        AmLyrics.motionParameters.set(syllable, parameters);
+      }
+      const { chars, duration, start, cjk } = parameters;
+      const count = chars.length;
+      if (!count) return;
+      const elapsed = timeMs - start;
+      const factor = cjk ? 0.8 : 0.4;
+      const delay = Math.min((duration / count) * factor, factor);
+      const hold = (2 * duration) / count;
+      const response = Math.min(3, duration);
+      const emphasis = cjk ? 0 : AmLyrics.clamp(duration - 1, 0, 1);
+      const glow = cjk ? 0 : 0.4 * AmLyrics.clamp((duration - 1) / 0.5, 0, 1);
+      const spanDuration = Math.max(hold + response * 2, cjk ? 3 : 0);
+      chars.forEach((char, index) => {
+        if (elapsed < 0) {
+          AmLyrics.clearCharacterMotion(char);
+          return;
+        }
+        const startDelay = (index + 1) * delay * 1000;
+        const end = spanDuration * 1000 + startDelay;
+        const key = parameters;
+        let entry = AmLyrics.characterAnimations.get(char);
+        if (!entry || entry.key !== key) {
+          AmLyrics.clearCharacterMotion(char);
+          const frameKey = `${duration}:${count}:${index}:${cjk}`;
+          let frames = AmLyrics.characterFrames.get(frameKey);
+          if (!frames) {
+            frames = Array.from({ length: 121 }, (_, frame) => {
+              const time = (spanDuration * frame) / 120;
+              let rise = cjk
+                ? 1 -
+                  AmLyrics.sampleSpring(1, 0, time, Math.sqrt(14), 3.5).position
+                : AmLyrics.springProgress(time, response);
+              if (frame === 120) rise = 1;
+              const envelope =
+                frame === 120
+                  ? 0
+                  : AmLyrics.springProgress(time, response) *
+                    (1 - AmLyrics.springProgress(time - hold, response));
+              const x =
+                (index - (count - 1) / 2) * 0.5 * 0.14 * emphasis * envelope;
+              const lift = 4.5 * emphasis * envelope;
+              return {
+                offset: frame / 120,
+                transform: `translate3d(calc(${x}em * var(--am-lyrics-lift)), calc((var(--char-rise-y) * ${rise} - ${lift}px) * var(--am-lyrics-lift)), 0) scale(${1 + 0.14 * emphasis * envelope})`,
+                ...(glow
+                  ? {
+                      textShadow: `0 0 0.3em rgb(255 255 255 / ${glow * envelope})`,
+                    }
+                  : {}),
+              };
+            });
+            if (AmLyrics.characterFrames.size >= 64) {
+              AmLyrics.characterFrames.delete(
+                AmLyrics.characterFrames.keys().next().value!,
+              );
+            }
+            AmLyrics.characterFrames.set(frameKey, frames);
+          }
+          char.classList.add('native-motion');
+          const animation = char.animate(frames, {
+            duration: spanDuration * 1000,
+            delay: startDelay,
+            fill: 'both',
+            easing: 'linear',
+          });
+          animation.currentTime = Math.min(elapsed, end);
+          entry = { animation, end, key };
+          AmLyrics.characterAnimations.set(char, entry);
+        } else if (
+          Math.abs(
+            Number(entry.animation.currentTime) - Math.min(elapsed, entry.end),
+          ) > 200
+        ) {
+          // Correct seeks/drift, not every playback tick: repeated currentTime
+          // writes pin compositor motion to the host's timestamp frequency.
+          entry.animation.currentTime = Math.min(elapsed, entry.end);
+          if (elapsed < entry.end && entry.animation.playState === 'finished')
+            entry.animation.play();
+        }
+      });
+    });
+  }
+
+  private static springProgress(time: number, response: number): number {
+    if (time <= 0) return 0;
+    // Unit-mass critically damped spring, omega = 2 pi / response.
+    // Native constructor: RVA 0x1559b0. Exact step response, no frame integration.
+    const phase = (2 * Math.PI * time) / Math.max(0.001, response);
+    return 1 - (1 + phase) * Math.exp(-phase);
+  }
+
   private static updateSyllablesForLine(
     line: HTMLElement,
     currentTimeMs: number,
   ): void {
+    AmLyrics.updateCharacterMotion(line, currentTimeMs);
     // DOM cache: avoid querySelectorAll on every frame
     let syllables: HTMLElement[] = (line as any)._cachedSyllableElements;
     if (!syllables) {
@@ -7425,128 +6869,6 @@ export class AmLyrics extends LitElement {
           }
         }
       }
-    }
-  }
-
-  private animateProgress() {
-    const now = performance.now();
-    let running = false;
-
-    if (!this.lyrics || this.activeLineIndices.length === 0) {
-      if (this.animationFrameId) {
-        cancelAnimationFrame(this.animationFrameId);
-        this.animationFrameId = undefined;
-      }
-      return;
-    }
-
-    // Process each active line
-    for (const lineIndex of this.activeLineIndices) {
-      const line = this.lyrics[lineIndex];
-      const mainWordAnimation = this.mainWordAnimations.get(lineIndex);
-
-      // Main text animation
-      if (mainWordAnimation && mainWordAnimation.duration > 0) {
-        const elapsed = now - mainWordAnimation.startTime;
-        if (elapsed >= 0) {
-          const progress = Math.min(1, elapsed / mainWordAnimation.duration);
-          this.mainWordProgress.set(lineIndex, progress);
-
-          if (progress < 1) {
-            running = true;
-          } else {
-            // Word animation finished. Look for the next word in the same line.
-            const currentMainWordIndex =
-              this.activeMainWordIndices.get(lineIndex) ?? -1;
-            const nextWordIndex = currentMainWordIndex + 1;
-            if (
-              currentMainWordIndex !== -1 &&
-              nextWordIndex < line.text.length
-            ) {
-              const currentWord = line.text[currentMainWordIndex];
-              const nextWord = line.text[nextWordIndex];
-
-              this.activeMainWordIndices.set(lineIndex, nextWordIndex);
-              const gap = nextWord.timestamp - currentWord.endtime;
-              const nextWordDuration = nextWord.endtime - nextWord.timestamp;
-
-              this.mainWordAnimations.set(lineIndex, {
-                startTime: performance.now() + gap,
-                duration: nextWordDuration,
-              });
-              running = true;
-            } else {
-              this.mainWordAnimations.set(lineIndex, {
-                startTime: 0,
-                duration: 0,
-              });
-            }
-          }
-        } else {
-          // Waiting in a gap
-          this.mainWordProgress.set(lineIndex, 0);
-          running = true;
-        }
-      }
-
-      // Background text animation
-      const backgroundWordAnimation =
-        this.backgroundWordAnimations.get(lineIndex);
-      if (backgroundWordAnimation && backgroundWordAnimation.duration > 0) {
-        const elapsed = now - backgroundWordAnimation.startTime;
-        if (elapsed >= 0) {
-          const progress = Math.min(
-            1,
-            elapsed / backgroundWordAnimation.duration,
-          );
-          this.backgroundWordProgress.set(lineIndex, progress);
-
-          if (progress < 1) {
-            running = true;
-          } else {
-            // Word animation finished. Look for the next word in the same line.
-            const currentBackgroundWordIndex =
-              this.activeBackgroundWordIndices.get(lineIndex) ?? -1;
-            if (
-              line.backgroundText &&
-              currentBackgroundWordIndex !== -1 &&
-              currentBackgroundWordIndex < line.backgroundText.length - 1
-            ) {
-              const nextWordIndex = currentBackgroundWordIndex + 1;
-              const currentWord =
-                line.backgroundText[currentBackgroundWordIndex];
-              const nextWord = line.backgroundText[nextWordIndex];
-
-              this.activeBackgroundWordIndices.set(lineIndex, nextWordIndex);
-              const gap = nextWord.timestamp - currentWord.endtime;
-              const nextWordDuration = nextWord.endtime - nextWord.timestamp;
-
-              this.backgroundWordAnimations.set(lineIndex, {
-                startTime: performance.now() + gap,
-                duration: nextWordDuration,
-              });
-              running = true;
-            } else {
-              this.backgroundWordAnimations.set(lineIndex, {
-                startTime: 0,
-                duration: 0,
-              });
-            }
-          }
-        } else {
-          // Waiting in a gap
-          this.backgroundWordProgress.set(lineIndex, 0);
-          running = true;
-        }
-      }
-    }
-
-    if (running) {
-      this.animationFrameId = requestAnimationFrame(this._boundAnimateProgress);
-    } else if (this.animationFrameId) {
-      // Stop animation if no words are running
-      cancelAnimationFrame(this.animationFrameId);
-      this.animationFrameId = undefined;
     }
   }
 
@@ -7781,24 +7103,52 @@ export class AmLyrics extends LitElement {
                         >`
                       : '';
 
-                  return html`<span class="lyrics-word"
+                  const bgChars =
+                    !syllable.lineSynced &&
+                    AmLyrics.characterMotionMode(
+                      syllable.text,
+                      durationMs,
+                      true,
+                    ) !== 'none'
+                      ? Array.from(syllable.text.replace(/\s/g, ''))
+                      : [];
+                  let bgCharIndex = 0;
+                  return html`<span
+                    class="lyrics-word"
+                    data-virtual-word-start="${startTimeMs}"
+                    data-virtual-word-end="${endTimeMs}"
                     ><span
                       class="lyrics-syllable-wrap${bgRomanizedText
                         ? ' has-transliteration'
                         : ''}"
                       ><span
-                        class="lyrics-syllable no-chars${syllable.lineSynced
+                        class="lyrics-syllable ${bgChars.length
+                          ? 'has-chars'
+                          : 'no-chars'}${syllable.lineSynced
                           ? ' line-synced'
                           : ''}"
                         data-start-time="${startTimeMs}"
                         data-end-time="${endTimeMs}"
                         data-duration="${durationMs}"
-                        data-syllable-index="${syllableIndex}"
+                        data-syllable-index="0"
                         data-word-index="${syllableIndex}"
                         data-word-length="${syllable.text.replace(/\s/g, '')
                           .length}"
                         data-wipe-ratio="1"
-                        >${syllable.text}</span
+                        >${bgChars.length
+                          ? Array.from(syllable.text).map(char => {
+                              if (/\s/.test(char)) return char;
+                              const index = bgCharIndex;
+                              bgCharIndex += 1;
+                              return html`<span
+                                class="char"
+                                data-syllable-char-index="${index}"
+                                data-wipe-start="${index / bgChars.length}"
+                                data-wipe-duration="${1 / bgChars.length}"
+                                >${char}</span
+                              >`;
+                            })
+                          : syllable.text}</span
                       >${bgRomanizedText}</span
                     ></span
                   >`;
@@ -7818,7 +7168,6 @@ export class AmLyrics extends LitElement {
         const groupGlowing = lineData?.groupGlowing ?? [];
         const groupCharRise = lineData?.groupCharRise ?? [];
         const groupCharDrag = lineData?.groupCharDrag ?? [];
-        const vwFullText = lineData?.vwFullText ?? [];
         const vwFullDuration = lineData?.vwFullDuration ?? [];
         const vwCharOffset = lineData?.vwCharOffset ?? [];
         const vwStartMs = lineData?.vwStartMs ?? [];
@@ -7836,11 +7185,9 @@ export class AmLyrics extends LitElement {
             const isAnimatedByChar = isGrowable || isCharRise || isCharDrag;
             const groupLineSynced = group.some(s => s.lineSynced);
 
-            const wordText = isAnimatedByChar ? vwFullText[groupIdx] : '';
             const wordDuration = isAnimatedByChar
               ? vwFullDuration[groupIdx]
               : 0;
-            const wordNumChars = wordText.replace(/\s/g, '').length;
             const groupCharOffset = isAnimatedByChar
               ? vwCharOffset[groupIdx]
               : 0;
@@ -7901,138 +7248,36 @@ export class AmLyrics extends LitElement {
                       >`
                     : '';
 
+                const animateSyllable =
+                  isAnimatedByChar &&
+                  !groupLineSynced &&
+                  AmLyrics.characterMotionMode(
+                    text,
+                    durationMs,
+                    line.background,
+                  ) !== 'none';
+
                 let syllableContent: any = text;
 
-                if (isAnimatedByChar) {
+                if (animateSyllable) {
                   const numCharsInSyllable =
-                    text.replace(/\s/g, '').length || 1;
-                  const hasVirtualTiming =
-                    wordDuration > 0 && Number.isFinite(virtualWordStart);
-                  const syllableStartRatio = hasVirtualTiming
-                    ? AmLyrics.clamp(
-                        (startTimeMs - virtualWordStart) / wordDuration,
-                        0,
-                        1,
-                      )
-                    : 0;
-                  const syllableDurationRatio = hasVirtualTiming
-                    ? AmLyrics.clamp(durationMs / wordDuration, 0, 1)
-                    : 1;
+                    Array.from(text.replace(/\s/g, '')).length || 1;
                   let charIndexInsideSyllable = 0;
 
-                  syllableContent = html`${text.split('').map(char => {
+                  syllableContent = html`${Array.from(text).map(char => {
                     if (char === ' ') return ' ';
 
                     const charIndexInsideWord =
                       groupCharOffset + sylCharAccumulator;
                     const localCharIndex = charIndexInsideSyllable;
-                    const visibleWordChars = Math.max(1, wordNumChars);
-                    const charStartPercentVal = AmLyrics.clamp(
-                      syllableStartRatio +
-                        (localCharIndex / numCharsInSyllable) *
-                          syllableDurationRatio,
-                      0,
-                      1,
-                    );
-                    const charDurationPercentVal =
-                      syllableDurationRatio / numCharsInSyllable ||
-                      1 / visibleWordChars;
-
                     sylCharAccumulator += 1;
                     charIndexInsideSyllable += 1;
 
-                    const minDuration = 400;
-                    const maxDuration = 3000;
-                    const easingPower = 3;
-                    const progress = Math.min(
-                      1,
-                      Math.max(
-                        0,
-                        (wordDuration - minDuration) /
-                          (maxDuration - minDuration),
-                      ),
-                    );
-                    const easedProgress = progress ** easingPower;
-
-                    const isLongWord = wordNumChars > 5;
-                    const isShortDuration = wordDuration < 1200;
-                    let maxDecayRate = 0;
-                    if (isLongWord || isShortDuration) {
-                      let decayStrength = 0;
-                      if (isLongWord)
-                        decayStrength +=
-                          Math.min((wordNumChars - 5) / 5, 1.0) * 0.4;
-                      if (isShortDuration && wordNumChars > 3)
-                        decayStrength +=
-                          Math.max(0, 1.0 - (wordDuration - 800) / 400) * 0.3;
-                      else if (isShortDuration && wordNumChars <= 3)
-                        decayStrength +=
-                          Math.max(0, 1.0 - (wordDuration - 800) / 400) * 0.1;
-                      maxDecayRate = Math.min(decayStrength, 0.7);
-                    }
-
-                    const positionInWord =
-                      wordNumChars > 1
-                        ? charIndexInsideWord / (wordNumChars - 1)
-                        : 0;
-                    const decayFactor = 1.0 - positionInWord * maxDecayRate;
-                    const charProgress = easedProgress * decayFactor;
-
-                    const baseGrowth = wordNumChars <= 3 ? 0.05 : 0.04;
-                    const charMaxScale = 1.0 + baseGrowth + charProgress * 0.08;
-                    const glowDurFactor = Math.min(1.1, wordDuration / 1500);
-                    let glowLenFactor = 1.0;
-                    if (wordNumChars <= 3) {
-                      glowLenFactor = 0.85;
-                    } else if (wordNumChars >= 6) {
-                      glowLenFactor = 1.1;
-                    }
-                    const glowIntensityScale = glowDurFactor * glowLenFactor;
-                    const charShadowIntensity = isGlowing
-                      ? (0.35 + charProgress * 0.45) * glowIntensityScale
-                      : 0;
-                    const normalizedGrowth = (charMaxScale - 1.0) / 0.1;
-                    const effectiveDuration =
-                      (wordDuration + durationMs * 2) / 3;
-                    const peakMultiplier = Math.min(
-                      1,
-                      Math.max(0.3, effectiveDuration / 2000),
-                    );
-                    const baseTranslateYPeak =
-                      -normalizedGrowth * (2 * peakMultiplier); // Further dampened lift peak
-
-                    const position = (charIndexInsideWord + 0.5) / wordNumChars;
-                    const horizontalOffset =
-                      (position - 0.5) * 2 * ((charMaxScale - 1.0) * 25);
-                    const isDragMotion = isCharDrag;
-                    let charTranslateYPeak = baseTranslateYPeak;
-                    if (isCharRise) {
-                      charTranslateYPeak = 0;
-                    } else if (isDragMotion) {
-                      charTranslateYPeak = -0.78;
-                    }
-
-                    let motionHorizontalOffset = horizontalOffset;
-                    if (isCharRise) {
-                      motionHorizontalOffset = 0;
-                    } else if (isDragMotion) {
-                      motionHorizontalOffset = 0;
-                    }
                     return html`<span
                       class="char"
                       data-char-index="${charIndexInsideWord}"
                       data-syllable-char-index="${charIndexInsideWord}"
-                      data-wipe-start="${charStartPercentVal.toFixed(4)}"
-                      data-wipe-duration="${charDurationPercentVal.toFixed(4)}"
-                      data-horizontal-offset="${horizontalOffset.toFixed(2)}"
-                      data-max-scale="${charMaxScale.toFixed(3)}"
-                      data-matrix-scale="${(charMaxScale * 0.98).toFixed(3)}"
-                      data-char-offset-x="${(
-                        motionHorizontalOffset * 0.98
-                      ).toFixed(2)}"
-                      data-shadow-intensity="${charShadowIntensity.toFixed(3)}"
-                      data-translate-y-peak="${charTranslateYPeak.toFixed(3)}"
-                      style="--word-wipe-width: ${visibleWordChars}ch; --char-wipe-position: -${charIndexInsideWord}ch"
+                      style="--word-wipe-width: ${numCharsInSyllable}ch; --char-wipe-position: -${localCharIndex}ch"
                       >${char}</span
                     >`;
                   })}`;
@@ -8045,7 +7290,7 @@ export class AmLyrics extends LitElement {
                   ><span
                     class="lyrics-syllable${groupLineSynced
                       ? ' line-synced'
-                      : ''}${isAnimatedByChar ? ' has-chars' : ' no-chars'}"
+                      : ''}${animateSyllable ? ' has-chars' : ' no-chars'}"
                     data-start-time="${startTimeMs}"
                     data-end-time="${endTimeMs}"
                     data-duration="${durationMs}"
@@ -8181,7 +7426,12 @@ export class AmLyrics extends LitElement {
       <div
         class="lyrics-container ${isUnsynced
           ? 'is-unsynced'
-          : 'blur-inactive-enabled'} ${hasDuetLines ? 'has-duet-lines' : ''}"
+          : ''} ${!isUnsynced && !this.noBlur
+          ? 'blur-inactive-enabled'
+          : ''} ${hasDuetLines ? 'has-duet-lines' : ''} ${this
+          .shouldReduceMotion
+          ? 'reduced-motion'
+          : ''}"
         role="region"
         aria-label="Synced lyrics"
       >
