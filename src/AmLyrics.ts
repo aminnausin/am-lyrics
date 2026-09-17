@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.7.0';
+const VERSION = '1.7.1';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -110,6 +110,7 @@ interface ParsedQueryMetadata {
 }
 
 interface YouLyPlusLyricsResult {
+  originalTTML?: string;
   lines: LyricsLine[];
   source: string;
   songwriters?: string;
@@ -810,8 +811,8 @@ export class AmLyrics extends LitElement {
 
     /* Non-growable words float up with a gentle curve */
     .lyrics-line.active:not(.lyrics-gap)
-      .lyrics-word
-      .lyrics-syllable.no-chars.highlight {
+      .lyrics-word.word-started
+      .lyrics-syllable.no-chars {
       transform: translate3d(
         0,
         calc(var(--char-rise-y, -1.12px) * var(--am-lyrics-lift)),
@@ -919,8 +920,8 @@ export class AmLyrics extends LitElement {
 
     .lyrics-line.active:not(.lyrics-gap)
       .background-vocal-container
-      .lyrics-word
-      .lyrics-syllable.no-chars.highlight,
+      .lyrics-word.word-started
+      .lyrics-syllable.no-chars,
     .lyrics-line.persist-highlight:not(.lyrics-gap)
       .background-vocal-container
       .lyrics-word
@@ -965,12 +966,51 @@ export class AmLyrics extends LitElement {
       font-feature-settings: 'liga' 0;
       background-clip: text;
       -webkit-background-clip: text;
-      backface-visibility: hidden;
+      position: relative;
+      padding-inline: 0.04em;
+      margin-inline: -0.04em;
+      background-origin: content-box;
+      -webkit-text-fill-color: transparent;
       transform-origin: 50% 80%;
       transition:
         color 0.7s,
         background-color 0.7s,
         transform 0.7s ease;
+    }
+
+    /* Paint the glow once, then composite its opacity. Animating text-shadow
+       on every glyph forces text rasterization throughout the rise. */
+    .lyrics-syllable .char.native-motion[data-glow]::after {
+      content: attr(data-glyph);
+      position: absolute;
+      inset: 0;
+      padding-inline: 0.04em;
+      pointer-events: none;
+      color: transparent;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 0.3em rgb(255 255 255 / var(--char-glow-max, 0));
+      animation: char-glow var(--char-glow-duration) linear
+        var(--char-glow-delay) both;
+    }
+
+    @keyframes char-glow {
+      0%,
+      100% {
+        opacity: 0;
+      }
+      15% {
+        opacity: 0.8;
+      }
+      30% {
+        opacity: 1;
+      }
+      60% {
+        opacity: 0.3;
+      }
+    }
+
+    .reduced-motion .char::after {
+      display: none;
     }
 
     .lyrics-syllable.finished span.char {
@@ -1088,7 +1128,10 @@ export class AmLyrics extends LitElement {
       /* The preceding lyric already owns the normal line spacing. Include it
          in the dot layer so the dots sit midway between the surrounding lyric
          boxes, including while the instrumental row expands or collapses. */
-      height: calc(100% + var(--am-lyrics-line-spacing));
+      height: calc(
+        var(--am-lyrics-instrumental-height) +
+          var(--am-lyrics-instrumental-spacing) + var(--am-lyrics-line-spacing)
+      );
       margin: 0;
       line-height: 1;
       opacity: 0;
@@ -1145,12 +1188,16 @@ export class AmLyrics extends LitElement {
       opacity: 55%;
     }
 
-    .lyrics-line.active .lyrics-syllable.line-synced {
+    /* Line-timed text lights up with predictive scrolling. Keeping the same
+       animation in both states avoids restarting the fade at its timestamp. */
+    .lyrics-line:is(.active, .pre-active) .lyrics-syllable.line-synced {
       animation: fade-in-line 0.2s ease-out forwards !important;
       color: var(--lyplus-text-primary) !important;
     }
 
-    .lyrics-line.active .lyrics-syllable.line-synced span.char {
+    .lyrics-line:is(.active, .pre-active)
+      .lyrics-syllable.line-synced
+      span.char {
       background-image: none !important;
       background-color: var(--lyplus-text-primary) !important;
       transition: background-color 120ms ease-out !important;
@@ -1353,15 +1400,20 @@ export class AmLyrics extends LitElement {
       position: relative;
       display: inline-flex;
       align-items: center;
-      padding: 0 12px;
+      justify-content: center;
+      flex: 0 0 auto;
+      box-sizing: border-box;
+      height: 26px;
+      padding: 0 8px;
       border: 0;
-      min-height: 40px;
       background: rgba(255, 255, 255, 0.06);
-      border-radius: 12px;
+      border-radius: 6px;
       color: #aaa;
       cursor: pointer;
       font-family: inherit;
       font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
       transition:
         color 0.2s ease,
         border-color 0.2s ease,
@@ -1379,6 +1431,9 @@ export class AmLyrics extends LitElement {
     }
 
     .source-switch-svg {
+      flex: 0 0 12px;
+      width: 12px;
+      height: 12px;
       margin-right: 4px;
     }
 
@@ -1413,14 +1468,17 @@ export class AmLyrics extends LitElement {
     }
 
     .format-select {
-      min-height: 40px;
+      box-sizing: border-box;
+      flex: 0 0 auto;
+      height: 28px;
       background: rgba(255, 255, 255, 0.06);
       border: 1px solid rgba(255, 255, 255, 0.3);
-      border-radius: 12px;
+      border-radius: 6px;
       color: rgba(255, 255, 255, 0.6);
-      font-size: 0.8em;
+      font-size: 12px;
+      line-height: normal;
       margin-left: 0;
-      padding: 0 28px 0 12px;
+      padding: 0 6px;
       cursor: pointer;
       font-weight: normal;
       font-family: inherit;
@@ -1866,7 +1924,7 @@ export class AmLyrics extends LitElement {
   songTitle?: string;
 
   @state()
-  private downloadFormat: 'auto' | 'lrc' | 'ttml' = 'auto';
+  private downloadFormat: 'auto' | 'lrc' | 'ttml' | 'plain' = 'auto';
 
   @property({ type: String, attribute: 'song-artist' })
   songArtist?: string;
@@ -2012,6 +2070,7 @@ export class AmLyrics extends LitElement {
       this.activeLineIndices = [];
       this.preActiveLineElements = [];
       this.positionedLineElements = [];
+      this.clearGapAnimations();
       this.activeGapLineElements = [];
       this.clearBackgroundExpandedLine();
 
@@ -2120,6 +2179,11 @@ export class AmLyrics extends LitElement {
 
   private gapElementCache = new Map<number, HTMLElement>();
 
+  private gapAnimations = new Map<
+    HTMLElement,
+    { animations: Animation[]; end: number }
+  >();
+
   private gapDotCache = new WeakMap<HTMLElement, HTMLElement[]>();
 
   private gapExitDurationCache = new WeakMap<HTMLElement, number>();
@@ -2205,6 +2269,7 @@ export class AmLyrics extends LitElement {
   }
 
   disconnectedCallback() {
+    this.clearGapAnimations();
     super.disconnectedCallback();
     this.motionPreference?.removeEventListener(
       'change',
@@ -2243,6 +2308,7 @@ export class AmLyrics extends LitElement {
     }
     this.preActiveLineElements = [];
     this.positionedLineElements = [];
+    this.clearGapAnimations();
     this.activeGapLineElements = [];
     this.lastInstrumentalIndex = null;
     this.visibilityObserver?.disconnect();
@@ -2276,6 +2342,7 @@ export class AmLyrics extends LitElement {
             {
               lines: this.lyrics,
               source: 'Local',
+              originalTTML: this.ttml,
               songwriters: this.songwriters,
             },
           ];
@@ -2409,6 +2476,7 @@ export class AmLyrics extends LitElement {
     this.activeLineIndices = [];
     this.preActiveLineElements = [];
     this.positionedLineElements = [];
+    this.clearGapAnimations();
     this.activeGapLineElements = [];
     this.lastInstrumentalIndex = null;
     this.clearBackgroundExpandedLine();
@@ -2918,6 +2986,7 @@ export class AmLyrics extends LitElement {
               return {
                 lines: parseResult.lines,
                 source: 'BiniLyrics',
+                originalTTML: ttmlText,
                 songwriters: parseResult.songwriters,
               };
             }
@@ -4035,15 +4104,7 @@ export class AmLyrics extends LitElement {
           if (!newActiveLines.includes(lineIndex)) {
             const lineElement = this._getLineElement(lineIndex);
             if (lineElement) {
-              if (
-                isSeek ||
-                this.isUserScrolling ||
-                AmLyrics.isLineSyncedLine(this.lyrics?.[lineIndex])
-              ) {
-                AmLyrics.unfinishSyllables(lineElement);
-              } else {
-                AmLyrics.finishSyllablesUpToTime(lineElement, newTime);
-              }
+              AmLyrics.unfinishSyllables(lineElement);
 
               lineElement.classList.remove('active', 'scroll-exiting');
               lineElement.classList.remove('progressive-unblur');
@@ -4112,16 +4173,6 @@ export class AmLyrics extends LitElement {
         if (lineElement) {
           AmLyrics.updateSyllablesForLine(lineElement, newTime);
         }
-      }
-
-      const firstActive = this.activeLineIndices[0] ?? this.lyrics?.length ?? 0;
-      for (
-        let index = Math.max(0, firstActive - 3);
-        index < firstActive;
-        index += 1
-      ) {
-        const outgoing = this._getLineElement(index);
-        if (outgoing) AmLyrics.updateCharacterMotion(outgoing, newTime);
       }
 
       // Tie gap motion directly to playback time. This keeps the entrance,
@@ -4318,6 +4369,7 @@ export class AmLyrics extends LitElement {
       this.activeLineIndices = [];
       this.preActiveLineElements = [];
       this.positionedLineElements = [];
+      this.clearGapAnimations();
       this.activeGapLineElements = [];
       this.clearBackgroundExpandedLine();
       this.setUserScrolling(false);
@@ -4588,11 +4640,21 @@ export class AmLyrics extends LitElement {
     return el;
   }
 
+  private clearGapAnimations(): void {
+    this.gapAnimations.forEach((motion, gap) => {
+      motion.animations.forEach(animation => animation.cancel());
+      gap.classList.remove('active', 'gap-collapsing', 'gap-exiting');
+    });
+    this.gapAnimations.clear();
+  }
+
   private _invalidateCaches() {
+    this.clearGapAnimations();
     this.cancelLineScrollAnimation();
     this.lyricsContainer
       ?.querySelectorAll<HTMLElement>('.native-motion')
       .forEach(char => AmLyrics.clearCharacterMotion(char));
+    AmLyrics.motionWords = new WeakMap();
     AmLyrics.motionSyllables = new WeakMap();
     AmLyrics.motionParameters = new WeakMap();
     this.clearProgressiveBlurLine();
@@ -4605,6 +4667,7 @@ export class AmLyrics extends LitElement {
     this.cachedLineArray = [];
     this.preActiveLineElements = [];
     this.positionedLineElements = [];
+    this.clearGapAnimations();
     this.activeGapLineElements = [];
     this.lastInstrumentalIndex = null;
     this.clearBackgroundExpandedLine();
@@ -4683,7 +4746,9 @@ export class AmLyrics extends LitElement {
         while (vwEnd < wordGroups.length - 1) {
           const grp = wordGroups[vwEnd];
           const lastText = grp[grp.length - 1].text;
-          if (/\s$/.test(lastText)) break;
+          // Visible whitespace defines the word, not provider-specific part flags.
+          if (/\s$/.test(lastText) || /^\s/.test(wordGroups[vwEnd + 1][0].text))
+            break;
           vwEnd += 1;
         }
 
@@ -4701,21 +4766,15 @@ export class AmLyrics extends LitElement {
         if (isRTL) lineIsRTL = true;
         const isLineSynced =
           line.isWordSynced === false || line.text.some(s => s.lineSynced);
-        const modes = wordGroups
-          .slice(vwStart, vwEnd + 1)
-          .flatMap(group =>
-            group.map(syllable =>
-              isLineSynced
-                ? 'none'
-                : AmLyrics.characterMotionMode(
-                    syllable.text,
-                    syllable.endtime - syllable.timestamp,
-                    line.background,
-                  ),
-            ),
-          );
-        const isGrowableVW = modes.includes('emphasis');
-        const isCharRiseVW = modes.includes('rise');
+        const mode = isLineSynced
+          ? 'none'
+          : AmLyrics.characterMotionMode(
+              combinedText,
+              combinedDuration,
+              line.background,
+            );
+        const isGrowableVW = mode === 'emphasis';
+        const isCharRiseVW = mode === 'rise';
         const isCharDragVW = false;
         const isGlowingVW = isGrowableVW;
 
@@ -4757,9 +4816,7 @@ export class AmLyrics extends LitElement {
     this._rebuildDomCache();
 
     const charTimedWords = Array.from(
-      this.shadowRoot.querySelectorAll(
-        '.lyrics-word.growable, .lyrics-word.char-rise, .lyrics-word.char-drag',
-      ),
+      this.shadowRoot.querySelectorAll('.lyrics-word:has(.char)'),
     ) as HTMLElement[];
     if (charTimedWords.length === 0) return;
 
@@ -4922,125 +4979,111 @@ export class AmLyrics extends LitElement {
       dots = Array.from(gap.querySelectorAll<HTMLElement>('.lyrics-syllable'));
       this.gapDotCache.set(gap, dots);
     }
-    const isInGap = timeMs >= gapStartTime && timeMs < gapEndTime;
-    const isInExitTrail =
-      gap.classList.contains('gap-exiting') &&
-      timeMs < gapEndTime + GAP_EXIT_TRAIL_MS;
-
-    if (!isInGap) {
-      if (isInExitTrail) {
-        gap.style.setProperty('--gap-exit-scale', '0');
-        gap.style.setProperty('--gap-exit-opacity', '0');
-        return;
-      }
-      if (
-        gap.classList.contains('active') ||
-        gap.classList.contains('gap-collapsing') ||
-        gap.classList.contains('gap-exiting')
-      ) {
-        gap.classList.remove('active', 'gap-collapsing', 'gap-exiting');
-        gap.style.setProperty('--gap-scale', '0');
-        gap.style.setProperty('--gap-opacity', '0');
-        gap.style.removeProperty('--gap-exit-scale');
-        gap.style.removeProperty('--gap-exit-opacity');
-        dots.forEach(dot => {
-          dot.style.removeProperty('--gap-dot-opacity');
-        });
-        const gapIndex = this.activeGapLineElements.indexOf(gap);
-        if (gapIndex !== -1) this.activeGapLineElements.splice(gapIndex, 1);
-      }
+    const duration = Math.max(1, gapEndTime - gapStartTime);
+    const elapsed = timeMs - gapStartTime;
+    if (elapsed < 0 || elapsed >= duration + GAP_EXIT_TRAIL_MS) {
+      this.gapAnimations
+        .get(gap)
+        ?.animations.forEach(animation => animation.cancel());
+      this.gapAnimations.delete(gap);
+      gap.classList.remove('active', 'gap-collapsing', 'gap-exiting');
+      const index = this.activeGapLineElements.indexOf(gap);
+      if (index !== -1) this.activeGapLineElements.splice(index, 1);
       return;
     }
-
-    const duration = Math.max(1, gapEndTime - gapStartTime);
-    const elapsed = AmLyrics.clamp(timeMs - gapStartTime, 0, duration);
-    const remaining = Math.max(0, gapEndTime - timeMs);
-    const exitStartLeadMs = collapseLeadMs + exitLeadMs;
-    const isCollapsing = remaining <= collapseLeadMs;
-    const isExiting = remaining <= exitStartLeadMs;
-
-    gap.classList.toggle('active', !isCollapsing);
-    gap.classList.toggle('gap-collapsing', isCollapsing);
-    gap.classList.toggle('gap-exiting', isExiting);
-    if (!this.activeGapLineElements.includes(gap)) {
-      this.activeGapLineElements.push(gap);
-    }
-
-    /* Preserve the last committed 1.12 -> 0.85 alternate pulse, but derive it
-       from playback time so seeks and dropped frames cannot desynchronise it.
-       Phase the final inhale to reach its minimum exactly as the exit pop
-       begins, matching the old gap-loop/gap-ended hand-off. */
-    const pulseCycle = GAP_PULSE_DURATION_MS * 2;
-    const exitStart = duration - exitStartLeadMs;
-    const normalizedExitStart =
-      ((exitStart % pulseCycle) + pulseCycle) % pulseCycle;
-    const pulseOffset =
-      (((GAP_PULSE_DURATION_MS - normalizedExitStart) % pulseCycle) +
-        pulseCycle) %
-      pulseCycle;
-    const pulsePosition = (elapsed + pulseOffset) % pulseCycle;
-    const breathMix =
-      (1 - Math.cos((Math.PI * pulsePosition) / GAP_PULSE_DURATION_MS)) / 2;
-    const breathingScale =
-      GAP_BREATH_MAX_SCALE +
-      (GAP_BREATH_MIN_SCALE - GAP_BREATH_MAX_SCALE) * breathMix;
-    const entryScale = AmLyrics.easeOutExpo(
-      AmLyrics.clamp(elapsed / GAP_ENTRY_SCALE_MS, 0, 1),
+    const remaining = duration - elapsed;
+    gap.classList.toggle('active', remaining > collapseLeadMs);
+    gap.classList.toggle('gap-collapsing', remaining <= collapseLeadMs);
+    gap.classList.toggle(
+      'gap-exiting',
+      remaining <= collapseLeadMs + exitLeadMs,
     );
-    const scale = breathingScale * entryScale;
+    if (!this.activeGapLineElements.includes(gap))
+      this.activeGapLineElements.push(gap);
 
-    const entryOpacity = AmLyrics.clamp(elapsed / GAP_ENTRY_FADE_MS, 0, 1);
-
-    gap.style.setProperty('--gap-scale', scale.toFixed(4));
-    gap.style.setProperty('--gap-opacity', entryOpacity.toFixed(4));
-
-    if (isExiting) {
-      const exitProgress = AmLyrics.clamp(
-        (exitStartLeadMs - remaining) / Math.max(1, exitLeadMs),
+    let motion = this.gapAnimations.get(gap);
+    if (!motion) {
+      const layer = gap.querySelector<HTMLElement>('.main-vocal-container');
+      if (!layer) return;
+      const exitStart = Math.max(
+        GAP_ENTRY_SCALE_MS,
+        duration - collapseLeadMs - exitLeadMs,
+      );
+      const end = Math.min(duration, exitStart + exitLeadMs);
+      // Dense samples only around the entrance and exit; the slow breath needs
+      // far fewer. The browser interpolates all frames without playback ticks.
+      const times = new Set([
         0,
-        1,
-      );
-      let exitScale: number;
-      let exitOpacity = 1;
-      if (exitProgress <= GAP_EXIT_POP_PROGRESS) {
-        const popProgress = AmLyrics.clamp(
-          exitProgress / GAP_EXIT_POP_PROGRESS,
-          0,
-          1,
-        );
-        const easedPop = popProgress * popProgress * (3 - 2 * popProgress);
-        exitScale =
-          GAP_BREATH_MIN_SCALE +
-          (GAP_EXIT_POP_SCALE - GAP_BREATH_MIN_SCALE) * easedPop;
-      } else {
-        const disappearProgress = AmLyrics.clamp(
-          (exitProgress - GAP_EXIT_POP_PROGRESS) / (1 - GAP_EXIT_POP_PROGRESS),
-          0,
-          1,
-        );
-        const easedDisappear =
-          disappearProgress * disappearProgress * (3 - 2 * disappearProgress);
-        exitScale = GAP_EXIT_POP_SCALE * (1 - easedDisappear);
-        exitOpacity = 1 - easedDisappear;
-      }
-      gap.style.setProperty('--gap-exit-scale', exitScale.toFixed(4));
-      gap.style.setProperty('--gap-exit-opacity', exitOpacity.toFixed(4));
-    } else {
-      gap.style.removeProperty('--gap-exit-scale');
-      gap.style.removeProperty('--gap-exit-opacity');
+        GAP_ENTRY_FADE_MS,
+        GAP_ENTRY_SCALE_MS,
+        exitStart,
+        end,
+      ]);
+      for (let t = 25; t < GAP_ENTRY_SCALE_MS; t += 25) times.add(t);
+      for (let t = GAP_ENTRY_SCALE_MS; t < exitStart; t += 200) times.add(t);
+      for (let t = exitStart; t < end; t += 20) times.add(t);
+      const frames = [...times]
+        .filter(t => t <= end)
+        .sort((a, b) => a - b)
+        .map(time => {
+          const cycle = GAP_PULSE_DURATION_MS * 2;
+          const phase =
+            (time + GAP_PULSE_DURATION_MS - (exitStart % cycle) + cycle) %
+            cycle;
+          const mix =
+            (1 - Math.cos((Math.PI * phase) / GAP_PULSE_DURATION_MS)) / 2;
+          let scale =
+            (GAP_BREATH_MAX_SCALE +
+              (GAP_BREATH_MIN_SCALE - GAP_BREATH_MAX_SCALE) * mix) *
+            AmLyrics.easeOutExpo(Math.min(1, time / GAP_ENTRY_SCALE_MS));
+          let opacity = Math.min(1, time / GAP_ENTRY_FADE_MS);
+          if (time >= exitStart) {
+            const progress = (time - exitStart) / Math.max(1, end - exitStart);
+            const popping = progress <= GAP_EXIT_POP_PROGRESS;
+            const phaseProgress = popping
+              ? progress / GAP_EXIT_POP_PROGRESS
+              : (progress - GAP_EXIT_POP_PROGRESS) /
+                (1 - GAP_EXIT_POP_PROGRESS);
+            const ease =
+              phaseProgress * phaseProgress * (3 - 2 * phaseProgress);
+            scale = popping
+              ? GAP_BREATH_MIN_SCALE +
+                (GAP_EXIT_POP_SCALE - GAP_BREATH_MIN_SCALE) * ease
+              : GAP_EXIT_POP_SCALE * (1 - ease);
+            opacity = popping ? 1 : 1 - ease;
+          }
+          return { offset: time / end, transform: `scale(${scale})`, opacity };
+        });
+      const animation = layer.animate(frames, { duration: end, fill: 'both' });
+      const animations = [
+        animation,
+        ...dots.map((dot, index) =>
+          dot.animate([{ opacity: 0.25 }, { opacity: 1 }], {
+            duration: exitStart / 3,
+            delay: (index * exitStart) / 3,
+            fill: 'both',
+          }),
+        ),
+      ];
+      animations.forEach(effect => {
+        const timeline = effect;
+        timeline.currentTime = elapsed;
+      });
+      motion = { animations, end };
+      this.gapAnimations.set(gap, motion);
+    } else if (
+      Math.abs(
+        Number(motion.animations[0].currentTime) -
+          Math.min(elapsed, motion.end),
+      ) > 200
+    ) {
+      motion.animations.forEach(animation => {
+        const timeline = animation;
+        timeline.currentTime = elapsed;
+        if (animation.playState === 'finished' && elapsed < motion!.end)
+          animation.play();
+      });
     }
-
-    const sequentialDuration = Math.max(1, duration - exitStartLeadMs);
-    const sequenceProgress = AmLyrics.clamp(elapsed / sequentialDuration, 0, 1);
-    dots.forEach((dot, index) => {
-      const dotProgress = AmLyrics.clamp(sequenceProgress * 3 - index, 0, 1);
-      dot.style.setProperty(
-        '--gap-dot-opacity',
-        (0.25 + dotProgress * 0.75).toFixed(3),
-      );
-    });
-
-    AmLyrics.updateSyllablesForLine(gap, timeMs);
   }
 
   private clearPreActiveClasses(exceptLineIndex: number | null = null): void {
@@ -5130,7 +5173,7 @@ export class AmLyrics extends LitElement {
     // Padding is constant in every state, so reversals cannot accumulate spacing.
     target.style.setProperty(
       '--am-lyrics-background-vocal-height',
-      `${wrap.scrollHeight + 4}px`,
+      `${wrap.offsetHeight + 4}px`,
     );
     target.classList.add('bg-expanded');
   }
@@ -5348,22 +5391,12 @@ export class AmLyrics extends LitElement {
             '.lyrics-line:not(.lyrics-gap)',
           ),
         ) as HTMLElement[]);
-    const containerRect = this.lyricsContainer.getBoundingClientRect();
-    const anchorY = containerRect.top + this.getScrollPaddingTop();
-
-    for (let i = 0; i < lineElements.length; i += 1) {
-      const lineElement = lineElements[i];
+    for (const line of lineElements) {
       if (
-        lineElement.classList.contains('active') ||
-        !lineElement.classList.contains('persist-highlight')
+        !line.classList.contains('active') &&
+        line.classList.contains('persist-highlight')
       ) {
-        // eslint-disable-next-line no-continue
-        continue;
-      }
-      const lineRect = lineElement.getBoundingClientRect();
-      const hasScrolledPast = lineRect.bottom < anchorY - 2;
-      if (hasScrolledPast) {
-        AmLyrics.unfinishSyllables(lineElement);
+        AmLyrics.unfinishSyllables(line);
       }
     }
   }
@@ -6448,7 +6481,6 @@ export class AmLyrics extends LitElement {
     // first painted frame never uses fallback transform values.
 
     for (const [span, animationString] of charAnimationsMap.entries()) {
-      span.style.willChange = 'transform';
       span.style.removeProperty('background-color');
       span.style.animation = animationString;
     }
@@ -6492,6 +6524,7 @@ export class AmLyrics extends LitElement {
   private static resetWordAnimationState(line: HTMLElement): void {
     const wordElements = line.querySelectorAll('.lyrics-word');
     wordElements.forEach(wordElement => {
+      wordElement.classList.remove('word-started');
       const target = wordElement as any;
       target._wordPreWipeKey = undefined;
     });
@@ -6631,6 +6664,11 @@ export class AmLyrics extends LitElement {
    * Update syllables based on current time
    * Uses DOM caching and pre-highlight reset for smooth transitions
    */
+  private static motionWords = new WeakMap<
+    HTMLElement,
+    Array<{ element: HTMLElement; start: number }>
+  >();
+
   private static motionSyllables = new WeakMap<HTMLElement, HTMLElement[]>();
 
   private static motionParameters = new WeakMap<
@@ -6651,7 +6689,7 @@ export class AmLyrics extends LitElement {
 
   private static characterAnimations = new WeakMap<
     HTMLElement,
-    { animation: Animation; end: number; key: object }
+    { animation: Animation; end: number; key: object; glowEpoch: number }
   >();
 
   private static clearCharacterMotion(char: HTMLElement): void {
@@ -6660,6 +6698,7 @@ export class AmLyrics extends LitElement {
     entry.animation.cancel();
     AmLyrics.characterAnimations.delete(char);
     char.classList.remove('native-motion');
+    char.removeAttribute('data-glow');
   }
 
   private static updateCharacterMotion(
@@ -6670,20 +6709,38 @@ export class AmLyrics extends LitElement {
     // mass 1, stiffness 14, damping 7 in 0x2f4e46 / 0x2f510b.
     let syllables = AmLyrics.motionSyllables.get(line);
     if (!syllables) {
+      const seen = new Set<HTMLElement>();
       syllables = Array.from(
         line.querySelectorAll<HTMLElement>('.lyrics-syllable.has-chars'),
-      );
+      ).filter(syllable => {
+        const word = AmLyrics.getWordElementForSyllable(syllable);
+        const key = AmLyrics.getCachedVirtualWordElements(word)[0] || syllable;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
       AmLyrics.motionSyllables.set(line, syllables);
     }
     syllables.forEach(syllable => {
       let parameters = AmLyrics.motionParameters.get(syllable);
       if (!parameters) {
+        const word = AmLyrics.getWordElementForSyllable(syllable);
+        const chars = AmLyrics.getCachedVirtualWordCharSpans(
+          word,
+          AmLyrics.getCachedCharSpans(syllable),
+        );
+        const start = Number(
+          word?.dataset.virtualWordStart ?? syllable.dataset.startTime,
+        );
+        const end = Number(
+          word?.dataset.virtualWordEnd ?? syllable.dataset.endTime,
+        );
         parameters = {
-          chars: AmLyrics.getCachedCharSpans(syllable),
-          duration: Math.max(0.001, Number(syllable.dataset.duration) / 1000),
-          start: Number(syllable.dataset.startTime),
+          chars,
+          duration: Math.max(0.001, (end - start) / 1000),
+          start,
           cjk: /[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff]/.test(
-            syllable.textContent || '',
+            chars.map(char => char.textContent).join(''),
           ),
         };
         AmLyrics.motionParameters.set(syllable, parameters);
@@ -6697,7 +6754,7 @@ export class AmLyrics extends LitElement {
       const hold = (2 * duration) / count;
       const response = Math.min(3, duration);
       const emphasis = cjk ? 0 : AmLyrics.clamp(duration - 1, 0, 1);
-      const glow = cjk ? 0 : 0.4 * AmLyrics.clamp((duration - 1) / 0.5, 0, 1);
+      const glow = cjk ? 0 : 0.45 * AmLyrics.clamp((duration - 1) / 0.5, 0, 1);
       const spanDuration = Math.max(hold + response * 2, cjk ? 3 : 0);
       chars.forEach((char, index) => {
         if (elapsed < 0) {
@@ -6713,29 +6770,24 @@ export class AmLyrics extends LitElement {
           const frameKey = `${duration}:${count}:${index}:${cjk}`;
           let frames = AmLyrics.characterFrames.get(frameKey);
           if (!frames) {
-            frames = Array.from({ length: 121 }, (_, frame) => {
-              const time = (spanDuration * frame) / 120;
+            frames = Array.from({ length: 61 }, (_, frame) => {
+              const time = (spanDuration * frame) / 60;
               let rise = cjk
                 ? 1 -
                   AmLyrics.sampleSpring(1, 0, time, Math.sqrt(14), 3.5).position
                 : AmLyrics.springProgress(time, response);
-              if (frame === 120) rise = 1;
+              if (frame === 60) rise = 1;
               const envelope =
-                frame === 120
+                frame === 60
                   ? 0
                   : AmLyrics.springProgress(time, response) *
                     (1 - AmLyrics.springProgress(time - hold, response));
               const x =
-                (index - (count - 1) / 2) * 0.5 * 0.14 * emphasis * envelope;
-              const lift = 4.5 * emphasis * envelope;
+                (index - (count - 1) / 2) * 0.5 * 0.1 * emphasis * envelope;
+              const lift = 2.5 * emphasis * envelope;
               return {
-                offset: frame / 120,
-                transform: `translate3d(calc(${x}em * var(--am-lyrics-lift)), calc((var(--char-rise-y) * ${rise} - ${lift}px) * var(--am-lyrics-lift)), 0) scale(${1 + 0.14 * emphasis * envelope})`,
-                ...(glow
-                  ? {
-                      textShadow: `0 0 0.3em rgb(255 255 255 / ${glow * envelope})`,
-                    }
-                  : {}),
+                offset: frame / 60,
+                transform: `translate(calc(${x}em * var(--am-lyrics-lift)), calc((var(--char-rise-y) * ${rise} - ${lift}px) * var(--am-lyrics-lift))) scale(${1 + 0.1 * emphasis * envelope})`,
               };
             });
             if (AmLyrics.characterFrames.size >= 64) {
@@ -6745,6 +6797,19 @@ export class AmLyrics extends LitElement {
             }
             AmLyrics.characterFrames.set(frameKey, frames);
           }
+          if (glow) {
+            char.setAttribute('data-glyph', char.textContent || '');
+            char.setAttribute('data-glow', '');
+            char.style.setProperty('--char-glow-max', `${glow}`);
+            char.style.setProperty(
+              '--char-glow-duration',
+              `${spanDuration * 1000}ms`,
+            );
+            char.style.setProperty(
+              '--char-glow-delay',
+              `${startDelay - elapsed}ms`,
+            );
+          }
           char.classList.add('native-motion');
           const animation = char.animate(frames, {
             duration: spanDuration * 1000,
@@ -6753,7 +6818,7 @@ export class AmLyrics extends LitElement {
             easing: 'linear',
           });
           animation.currentTime = Math.min(elapsed, end);
-          entry = { animation, end, key };
+          entry = { animation, end, key, glowEpoch: elapsed };
           AmLyrics.characterAnimations.set(char, entry);
         } else if (
           Math.abs(
@@ -6763,6 +6828,17 @@ export class AmLyrics extends LitElement {
           // Correct seeks/drift, not every playback tick: repeated currentTime
           // writes pin compositor motion to the host's timestamp frequency.
           entry.animation.currentTime = Math.min(elapsed, entry.end);
+          if (glow) {
+            for (const effect of char.getAnimations()) {
+              if (
+                'animationName' in effect &&
+                effect.animationName === 'char-glow'
+              ) {
+                effect.currentTime = elapsed - entry.glowEpoch;
+                if (elapsed < entry.end) effect.play();
+              }
+            }
+          }
           if (elapsed < entry.end && entry.animation.playState === 'finished')
             entry.animation.play();
         }
@@ -6782,6 +6858,21 @@ export class AmLyrics extends LitElement {
     line: HTMLElement,
     currentTimeMs: number,
   ): void {
+    let words = AmLyrics.motionWords.get(line);
+    if (!words) {
+      words = Array.from(
+        line.querySelectorAll<HTMLElement>(
+          '.lyrics-word[data-virtual-word-start]',
+        ),
+      ).map(element => ({
+        element,
+        start: Number(element.dataset.virtualWordStart),
+      }));
+      AmLyrics.motionWords.set(line, words);
+    }
+    words.forEach(({ element, start }) =>
+      element.classList.toggle('word-started', currentTimeMs >= start),
+    );
     AmLyrics.updateCharacterMotion(line, currentTimeMs);
     // DOM cache: avoid querySelectorAll on every frame
     let syllables: HTMLElement[] = (line as any)._cachedSyllableElements;
@@ -6897,6 +6988,33 @@ export class AmLyrics extends LitElement {
     return lrc;
   }
 
+  private generatePlain(): string {
+    if (!this.lyrics) return '';
+    return this.lyrics
+      .flatMap(line => {
+        const main = line.text
+          .map(syllable => syllable.text)
+          .join('')
+          .trim();
+        const backing = (line.backgroundText || [])
+          .map(syllable => syllable.text)
+          .join('')
+          .trim();
+        // eslint-disable-next-line no-nested-ternary
+        const background = backing
+          ? backing.startsWith('(') && backing.endsWith(')')
+            ? backing
+            : `(${backing})`
+          : '';
+        return (
+          AmLyrics.getBackgroundTextPlacement(line) === 'before'
+            ? [background, main]
+            : [main, background]
+        ).filter(Boolean);
+      })
+      .join('\n');
+  }
+
   private generateTTML(): string {
     if (!this.lyrics) return '';
 
@@ -6985,15 +7103,23 @@ export class AmLyrics extends LitElement {
     const isWordSynced = this.lyrics.some(l => l.isWordSynced !== false);
 
     let content = '';
-    let extension = this.downloadFormat;
+    let extension: 'auto' | 'lrc' | 'ttml' | 'plain' | 'txt' =
+      this.downloadFormat;
     if (extension === 'auto') {
       extension = isWordSynced ? 'ttml' : 'lrc';
     }
     let mimeType = '';
 
     if (extension === 'ttml') {
-      content = this.generateTTML();
+      const source = this.availableSources[this.currentSourceIndex];
+      content =
+        (source?.source === this.lyricsSource && source.originalTTML) ||
+        this.generateTTML();
       mimeType = 'application/xml';
+    } else if (extension === 'plain') {
+      content = this.generatePlain();
+      extension = 'txt';
+      mimeType = 'text/plain;charset=utf-8';
     } else {
       content = this.generateLRC();
       mimeType = 'text/plain';
@@ -7075,6 +7201,35 @@ export class AmLyrics extends LitElement {
           ? AmLyrics.getBackgroundTextPlacement(line)
           : 'after';
 
+        const backingWords: Array<{
+          text: string;
+          start: number;
+          end: number;
+        }> = [];
+        const backing = line.backgroundText || [];
+        for (let first = 0; first < backing.length; ) {
+          let last = first;
+          while (
+            last + 1 < backing.length &&
+            !/\s$/.test(backing[last].text) &&
+            !/^\s/.test(backing[last + 1].text)
+          )
+            last += 1;
+          const word = {
+            text: backing
+              .slice(first, last + 1)
+              .map(syllable => syllable.text)
+              .join(''),
+            start: backing[first].timestamp,
+            end: backing[last].endtime,
+          };
+          for (let index = first; index <= last; index += 1)
+            backingWords[index] = word;
+          first = last + 1;
+        }
+
+        const lineIsRTL = this.cachedLineData?.[lineIndex]?.lineIsRTL ?? false;
+
         // Create background vocals container (with romanization support)
         const backgroundVocalElement = hasBackground
           ? html`<p
@@ -7103,26 +7258,30 @@ export class AmLyrics extends LitElement {
                         >`
                       : '';
 
+                  const backingWord = backingWords[syllableIndex];
                   const bgChars =
                     !syllable.lineSynced &&
                     AmLyrics.characterMotionMode(
-                      syllable.text,
-                      durationMs,
+                      backingWord.text,
+                      backingWord.end - backingWord.start,
                       true,
                     ) !== 'none'
                       ? Array.from(syllable.text.replace(/\s/g, ''))
                       : [];
                   let bgCharIndex = 0;
                   return html`<span
-                    class="lyrics-word"
-                    data-virtual-word-start="${startTimeMs}"
-                    data-virtual-word-end="${endTimeMs}"
+                    class="lyrics-word${bgChars.length ? ' char-rise' : ''}"
+                    data-virtual-word-id="bg-${lineIndex}-${backingWord.start}"
+                    data-virtual-word-start="${backingWord.start}"
+                    data-virtual-word-end="${backingWord.end}"
                     ><span
                       class="lyrics-syllable-wrap${bgRomanizedText
                         ? ' has-transliteration'
                         : ''}"
                       ><span
-                        class="lyrics-syllable ${bgChars.length
+                        class="lyrics-syllable${lineIsRTL
+                          ? ' rtl-text'
+                          : ''} ${bgChars.length
                           ? 'has-chars'
                           : 'no-chars'}${syllable.lineSynced
                           ? ' line-synced'
@@ -7172,7 +7331,6 @@ export class AmLyrics extends LitElement {
         const vwCharOffset = lineData?.vwCharOffset ?? [];
         const vwStartMs = lineData?.vwStartMs ?? [];
         const vwEndMs = lineData?.vwEndMs ?? [];
-        const lineIsRTL = lineData?.lineIsRTL ?? false;
 
         const mainVocalElement = html`<p
           class="main-vocal-container ${lineIsRTL ? 'rtl-text' : ''}"
@@ -7183,7 +7341,8 @@ export class AmLyrics extends LitElement {
             const isCharRise = groupCharRise[groupIdx];
             const isCharDrag = groupCharDrag[groupIdx];
             const isAnimatedByChar = isGrowable || isCharRise || isCharDrag;
-            const groupLineSynced = group.some(s => s.lineSynced);
+            const groupLineSynced =
+              line.isWordSynced === false || group.some(s => s.lineSynced);
 
             const wordDuration = isAnimatedByChar
               ? vwFullDuration[groupIdx]
@@ -7248,14 +7407,7 @@ export class AmLyrics extends LitElement {
                       >`
                     : '';
 
-                const animateSyllable =
-                  isAnimatedByChar &&
-                  !groupLineSynced &&
-                  AmLyrics.characterMotionMode(
-                    text,
-                    durationMs,
-                    line.background,
-                  ) !== 'none';
+                const animateSyllable = isAnimatedByChar && !groupLineSynced;
 
                 let syllableContent: any = text;
 
@@ -7288,7 +7440,9 @@ export class AmLyrics extends LitElement {
                     ? ' has-transliteration'
                     : ''}"
                   ><span
-                    class="lyrics-syllable${groupLineSynced
+                    class="lyrics-syllable${lineIsRTL
+                      ? ' rtl-text'
+                      : ''}${groupLineSynced
                       ? ' line-synced'
                       : ''}${animateSyllable ? ' has-chars' : ' no-chars'}"
                     data-start-time="${startTimeMs}"
@@ -7505,7 +7659,7 @@ export class AmLyrics extends LitElement {
                     aria-label="Lyrics download format"
                     @change=${(e: Event) => {
                       this.downloadFormat = (e.target as HTMLSelectElement)
-                        .value as 'lrc' | 'ttml';
+                        .value as typeof this.downloadFormat;
                     }}
                     .value=${this.downloadFormat}
                     @click=${(e: Event) => e.stopPropagation()}
@@ -7513,6 +7667,7 @@ export class AmLyrics extends LitElement {
                     <option value="auto">Auto</option>
                     <option value="lrc">LRC</option>
                     <option value="ttml">TTML</option>
+                    <option value="plain">Plain</option>
                   </select>
                   <button
                     type="button"
