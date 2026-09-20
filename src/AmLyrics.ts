@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.7.1';
+const VERSION = '1.7.2';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Timeout for all lyrics fetch requests
 const SEEK_THRESHOLD_MS = 500;
@@ -2354,6 +2354,29 @@ export class AmLyrics extends LitElement {
         }
       }
 
+      const lrcRedResult = await AmLyrics.fetchLyricsFromLrcRed(
+        this.songTitle?.trim() || '',
+        this.songArtist?.trim() || '',
+        this.isrc?.trim(),
+        {
+          album: this.songAlbum?.trim(),
+          durationMs: this.songDurationMs || this.duration,
+        },
+        this.query?.trim(),
+      );
+      if (controller.signal.aborted) return;
+      if (lrcRedResult) {
+        this.availableSources = [lrcRedResult];
+        this.lyrics = lrcRedResult.lines;
+        this.lyricsSource = lrcRedResult.source;
+        if (lrcRedResult.songwriters) {
+          this.songwriters = lrcRedResult.songwriters;
+        }
+        this._updateFooter();
+        await this.onLyricsLoaded();
+        return;
+      }
+
       const resolvedMetadata = await this.resolveSongMetadata();
       // If a newer fetch was triggered while we awaited, bail out
       if (controller.signal.aborted) return;
@@ -2506,6 +2529,7 @@ export class AmLyrics extends LitElement {
     parsedLines: any[],
   ): number {
     const lower = sourceLabel.toLowerCase();
+    if (lower === 'lrc.red') return 0;
     const hasWordSync = parsedLines.some(
       (line: any) =>
         line.text && Array.isArray(line.text) && line.text.length > 1,
@@ -2644,6 +2668,16 @@ export class AmLyrics extends LitElement {
         const resolvedMetadata = await this.resolveSongMetadata();
         if (resolvedMetadata?.metadata) {
           const newSources: YouLyPlusLyricsResult[] = [];
+
+          if (!this.availableSources.some(s => s.source === 'BiniLyrics')) {
+            const biniResult = await AmLyrics.fetchLyricsFromBiniLyrics(
+              resolvedMetadata.metadata.title,
+              resolvedMetadata.metadata.artist,
+              resolvedMetadata.catalogIsrc,
+              resolvedMetadata.metadata,
+            );
+            if (biniResult) newSources.push(biniResult);
+          }
 
           // Try Unison if not fetched
           if (
@@ -2924,6 +2958,73 @@ export class AmLyrics extends LitElement {
       }
     }
 
+    return null;
+  }
+
+  private static async fetchLyricsFromLrcRed(
+    title: string,
+    artist: string,
+    isrc?: string,
+    metadata: { durationMs?: number; album?: string } = {},
+    searchQuery = '',
+  ): Promise<YouLyPlusLyricsResult | null> {
+    const fetchTTML = async (trackIsrc: string) => {
+      try {
+        const response = await fetchWithTimeout(
+          `https://lrc.red/s/${encodeURIComponent(trackIsrc)}.ttml`,
+        );
+        if (!response.ok) return null;
+        const originalTTML = await response.text();
+        const parsed = AmLyrics.parseTTML(originalTTML);
+        if (!parsed?.lines.length) return null;
+        return {
+          lines: parsed.lines,
+          source: 'lrc.red',
+          originalTTML,
+          songwriters: parsed.songwriters,
+        };
+      } catch {
+        return null;
+      }
+    };
+
+    if (isrc) {
+      const result = await fetchTTML(isrc);
+      if (result) return result;
+    }
+
+    let url: string;
+    if (title && artist) {
+      const params = new URLSearchParams({ track: title, artist });
+      if (metadata.album) params.set('album', metadata.album);
+      if (
+        metadata.durationMs &&
+        Number.isFinite(metadata.durationMs) &&
+        metadata.durationMs > 0
+      ) {
+        params.set(
+          'duration',
+          Math.round(metadata.durationMs / 1000).toString(),
+        );
+      }
+      url = `https://lrc.red/match.json?${params.toString()}`;
+    } else if (searchQuery) {
+      url = `https://lrc.red/search.json?${new URLSearchParams({ q: searchQuery })}`;
+    } else {
+      return null;
+    }
+
+    try {
+      const response = await fetchWithTimeout(url);
+      if (!response.ok) return null;
+      const payload = await response.json();
+      const hit = Array.isArray(payload?.hits) ? payload.hits[0] : undefined;
+      if (typeof hit?.isrc === 'string' && hit.isrc.trim()) {
+        return await fetchTTML(hit.isrc.trim());
+      }
+    } catch {
+      // Continue with the existing providers when lrc.red is unavailable.
+    }
     return null;
   }
 

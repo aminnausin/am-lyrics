@@ -44,13 +44,13 @@ Or just use the CDN.
 
 | Property/Attribute       | Type      | Default     | Description                                                                                    |
 | ------------------------ | --------- | ----------- | ---------------------------------------------------------------------------------------------- |
-| `query`                  | `string`  | `undefined` | Search phrase that resolves metadata via LyricsPlus catalog (falls back to Apple Music search) |
+| `query`                  | `string`  | `undefined` | Search phrase for lrc.red, with LyricsPlus catalog fallback |
 | `music-id`               | `string`  | `undefined` | Specific Apple Music song ID (served through the backup Apple endpoint)                        |
-| `isrc`                   | `string`  | `undefined` | ISRC code to verify correct song match                                                         |
+| `isrc`                   | `string`  | `undefined` | ISRC code for direct lrc.red TTML lookup and provider matching |
 | `ttml`                   | `string`  | `undefined` | A string of TTML formatted lyrics to be rendered directly (bypasses all external requests)     |
-| `song-title`             | `string`  | `undefined` | Preferred title for LyricsPlus (primary) provider                                              |
-| `song-artist`            | `string`  | `undefined` | Preferred artist name for LyricsPlus provider                                                  |
-| `song-album`             | `string`  | `undefined` | Optional album name passed to LyricsPlus provider                                              |
+| `song-title`             | `string`  | `undefined` | Track title for lrc.red and fallback providers |
+| `song-artist`            | `string`  | `undefined` | Artist name for lrc.red and fallback providers |
+| `song-album`             | `string`  | `undefined` | Optional album name for provider matching |
 | `song-duration`          | `number`  | `undefined` | Optional song duration in milliseconds sent to LyricsPlus                                      |
 | `current-time`           | `number`  | `0`         | Current playback time in milliseconds                                                          |
 | `duration`               | `number`  | `undefined` | Playback timer duration in milliseconds. **Set to `-1` to reset/stop playback**                |
@@ -114,10 +114,10 @@ responsive values. CSS variables take precedence over the properties above.
 
 ## Lyrics matching
 
-1. Provide `song-title` and `song-artist` (plus optional `song-album`/`song-duration`) to request word-synced lyrics from LyricsPlus. A standalone `query` such as `"Bad Habit - Steve Lacy"` also works—the component looks up the metadata through LyricsPlus' `/v1/songlist/search` endpoint.
-2. If LyricsPlus cannot serve lyrics or metadata is missing, the component automatically falls back to the legacy Apple Music endpoint using the best available identifiers (`query`, `music-id`, `isrc`). Requests that rely solely on `music-id` are handled exclusively by this backup service because LyricsPlus does not support Apple IDs.
+1. lrc.red is the highest-priority provider. An `isrc` requests `/s/{isrc}.ttml` directly. Otherwise, `song-title` and `song-artist` use `/match.json`, including optional album and duration (converted from milliseconds to seconds). A standalone `query` uses `/search.json?q=...`. Match and search results supply the ISRC for the TTML download. If a direct ISRC lookup fails, the component tries the supplied track/artist or query.
+2. If lrc.red cannot serve usable lyrics, the component continues through BiniLyrics and the existing Unison, LyricsPlus, LRCLIB, and Genius fallbacks as metadata and synchronization quality allow. lrc.red does not accept Apple Music IDs directly.
 
-The footer shows the active provider (e.g. “LyricsPlus (KPoe)” or “Apple Music”) so you always know which service responded. Supplying both metadata _and_ a `query` gives the best results because the query remains available for the Apple Music backup.
+The footer shows the active provider, including “lrc.red”, and lets you load alternative sources. lrc.red uses the same TTML parser as BiniLyrics, and TTML downloads preserve the original file, including its timing, background vocals, and metadata. LRC and plain-text exports remain available.
 
 ## Events
 
