@@ -2144,19 +2144,22 @@ export class AmLyrics extends LitElement {
   private _updateFooter() {
     const footer = this.shadowRoot?.querySelector('.lyrics-footer');
     if (!footer) return;
-    const switchBtn = footer.querySelector('.source-switch-btn');
-    const svgEl = footer.querySelector('.source-switch-svg');
-    const labelEl = footer.querySelector('.source-switch-label');
+
+    const switchBtn =
+      footer.querySelector<HTMLButtonElement>('.source-switch-btn');
+    const svgEl = footer.querySelector<SVGElement>('.source-switch-svg');
+    const labelEl = footer.querySelector<HTMLElement>('.source-switch-label');
+
+    const isFetching = this.isFetchingAlternatives;
+
     if (switchBtn) {
-      (switchBtn as HTMLButtonElement).disabled = this.isFetchingAlternatives;
+      switchBtn.disabled = isFetching;
     }
-    if (svgEl) {
-      svgEl.classList.toggle('is-loading', this.isFetchingAlternatives);
-    }
+
+    svgEl?.classList.toggle('is-loading', isFetching);
+
     if (labelEl) {
-      labelEl.textContent = this.isFetchingAlternatives
-        ? 'Switching...'
-        : 'Switch';
+      labelEl.textContent = isFetching ? 'Switching...' : 'Switch';
     }
   }
 
@@ -2331,6 +2334,7 @@ export class AmLyrics extends LitElement {
     this.isLoading = true;
     this.lyrics = undefined;
     this.lyricsSource = null;
+    this.songwriters = '';
     this.availableSources = [];
     this.currentSourceIndex = 0;
     this.isFetchingAlternatives = false;
@@ -2361,29 +2365,6 @@ export class AmLyrics extends LitElement {
         }
       }
 
-      const lrcRedResult = await AmLyrics.fetchLyricsFromLrcRed(
-        this.songTitle?.trim() || '',
-        this.songArtist?.trim() || '',
-        this.isrc?.trim(),
-        {
-          album: this.songAlbum?.trim(),
-          durationMs: this.songDurationMs || this.duration,
-        },
-        this.query?.trim(),
-      );
-      if (controller.signal.aborted) return;
-      if (lrcRedResult) {
-        this.availableSources = [lrcRedResult];
-        this.lyrics = lrcRedResult.lines;
-        this.lyricsSource = lrcRedResult.source;
-        if (lrcRedResult.songwriters) {
-          this.songwriters = lrcRedResult.songwriters;
-        }
-        this._updateFooter();
-        await this.onLyricsLoaded();
-        return;
-      }
-
       const resolvedMetadata = await this.resolveSongMetadata();
       // If a newer fetch was triggered while we awaited, bail out
       if (controller.signal.aborted) return;
@@ -2396,13 +2377,46 @@ export class AmLyrics extends LitElement {
         !this.isrc;
 
       const collectedSources: YouLyPlusLyricsResult[] = [];
-      const parsedAllowedSources = this.allowedSources.toLowerCase();
+      const allowedSources = new Set(
+        this.allowedSources
+          .toLowerCase()
+          .split(',')
+          .map(source => source.trim())
+          .filter(Boolean),
+      );
 
       if (resolvedMetadata?.metadata && !isMusicIdOnlyRequest) {
         const title = resolvedMetadata.metadata.title?.trim() || '';
         const artist = resolvedMetadata.metadata.artist?.trim() || '';
 
-        if (parsedAllowedSources.includes('bini')) {
+        if (allowedSources.has('lrcred')) {
+          const lrcRedResult = await AmLyrics.fetchLyricsFromLrcRed(
+            //   this.songTitle?.trim() || '',
+            //   this.songArtist?.trim() || '',
+            title,
+            artist,
+            this.isrc?.trim(),
+            {
+              album: this.songAlbum?.trim(),
+              durationMs: this.songDurationMs || this.duration,
+            },
+            this.query?.trim(),
+          );
+          if (lrcRedResult) {
+            this.availableSources = [lrcRedResult];
+            this.lyrics = lrcRedResult.lines;
+            this.lyricsSource = lrcRedResult.source;
+            if (lrcRedResult.songwriters) {
+              this.songwriters = lrcRedResult.songwriters;
+            }
+            this.hasFetchedAllProviders = true;
+            this._updateFooter();
+            await this.onLyricsLoaded();
+            return;
+          }
+        }
+
+        if (allowedSources.has('bini')) {
           const biniResult = await AmLyrics.fetchLyricsFromBiniLyrics(
             title,
             artist,
@@ -2421,7 +2435,7 @@ export class AmLyrics extends LitElement {
 
         if (
           (collectedSources.length === 0 || !hasWordSync(collectedSources)) &&
-          parsedAllowedSources.includes('unison')
+          allowedSources.has('unison')
         ) {
           const unisonResult = await AmLyrics.fetchLyricsFromUnison(
             resolvedMetadata.metadata,
@@ -2433,7 +2447,7 @@ export class AmLyrics extends LitElement {
 
         if (
           (collectedSources.length === 0 || !hasWordSync(collectedSources)) &&
-          parsedAllowedSources.includes('youly')
+          allowedSources.has('youly')
         ) {
           const youLyResults = await AmLyrics.fetchLyricsFromYouLyPlus(
             title,
@@ -2496,7 +2510,7 @@ export class AmLyrics extends LitElement {
       if (
         collectedSources.length === 0 &&
         resolvedMetadata?.metadata &&
-        parsedAllowedSources.includes('genius')
+        allowedSources.has('genius')
       ) {
         const geniusResult = await AmLyrics.fetchLyricsFromGenius(
           resolvedMetadata.metadata,
@@ -2512,9 +2526,7 @@ export class AmLyrics extends LitElement {
 
       this.hasFetchedAllProviders =
         collectedSources.length === 0 ||
-        collectedSources.some(
-          s => s.source === 'LRCLIB' || s.source === 'Genius',
-        );
+        collectedSources.some(s => s.source === 'LRCLIB');
       this._updateFooter();
 
       if (collectedSources.length > 0) {

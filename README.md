@@ -56,7 +56,7 @@ npm install @aminnausin/am-lyrics
 | `font-family`            | `string`  | `undefined` | Custom font family for lyrics                                                                  |
 | `autoscroll`             | `boolean` | `true`      | Enable automatic scrolling to active lyrics                                                    |
 | `interpolate`            | `boolean` | `true`      | Enable smooth word-by-word highlighting animation                                              |
-| `allowed-sources`        | `string`  | `undefined` | Comma-separated list of optional lyric sources to query: `bini`, `unison`, `lyplus`, and `genius`. LRCLIB is always used as the final fallback and is not affected. |
+| `allowed-sources`        | `string`  | `undefined` | Comma-separated list of optional lyric sources to query: `lrcred`, `bini`, `unison`, `lyplus`, and `genius`. LRCLIB is always used as the final fallback and is not affected. |
 
 ## CSS Custom Properties (CSS Variables)
 
