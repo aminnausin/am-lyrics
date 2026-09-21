@@ -40,14 +40,14 @@ npm install @aminnausin/am-lyrics
 
 | Property/Attribute       | Type      | Default     | Description                                                                                    |
 | ------------------------ | --------- | ----------- | ---------------------------------------------------------------------------------------------- |
-| `query`                  | `string`  | `undefined` | Search phrase that resolves metadata via LyricsPlus catalog (falls back to Apple Music search) |
+| `query`                  | `string`  | `undefined` | Search phrase for lrc.red, with LyricsPlus catalog fallback |
 | `music-id`               | `string`  | `undefined` | Specific Apple Music song ID (served through the backup Apple endpoint)                        |
-| `isrc`                   | `string`  | `undefined` | ISRC code to verify correct song match                                                         |
+| `isrc`                   | `string`  | `undefined` | ISRC code for direct lrc.red TTML lookup and provider matching |
 | `ttml`                   | `string`  | `undefined` | A string of TTML formatted lyrics to be rendered directly (bypasses all external requests)     |
 | `lrc`                   | `string`  | `undefined` | A string of LRC formatted lyrics to be rendered directly (Is used as the default fallback if ttml fails)     |
-| `song-title`             | `string`  | `undefined` | Preferred title for LyricsPlus (primary) provider                                              |
-| `song-artist`            | `string`  | `undefined` | Preferred artist name for LyricsPlus provider                                                  |
-| `song-album`             | `string`  | `undefined` | Optional album name passed to LyricsPlus provider                                              |
+| `song-title`             | `string`  | `undefined` | Track title for lrc.red and fallback providers |
+| `song-artist`            | `string`  | `undefined` | Artist name for lrc.red and fallback providers |
+| `song-album`             | `string`  | `undefined` | Optional album name for provider matching |
 | `song-duration`          | `number`  | `undefined` | Optional song duration in milliseconds sent to LyricsPlus                                      |
 | `current-time`           | `number`  | `0`         | Current playback time in milliseconds                                                          |
 | `duration`               | `number`  | `undefined` | Playback timer duration in milliseconds. **Set to `-1` to reset/stop playback**                |
@@ -56,7 +56,7 @@ npm install @aminnausin/am-lyrics
 | `font-family`            | `string`  | `undefined` | Custom font family for lyrics                                                                  |
 | `autoscroll`             | `boolean` | `true`      | Enable automatic scrolling to active lyrics                                                    |
 | `interpolate`            | `boolean` | `true`      | Enable smooth word-by-word highlighting animation                                              |
-| `allowed-sources`        | `string`  | `undefined` | Comma-separated list of optional lyric sources to query: `bini`, `unison`, `lyplus`, and `genius`. LRCLIB is always used as the final fallback and is not affected. |
+| `allowed-sources`        | `string`  | `undefined` | Comma-separated list of optional lyric sources to query: `lrcred`, `bini`, `unison`, `lyplus`, and `genius`. LRCLIB is always used as the final fallback and is not affected. |
 
 ## CSS Custom Properties (CSS Variables)
 
@@ -112,11 +112,11 @@ responsive values. CSS variables take precedence over the properties above.
 
 ## Lyrics matching
 
-1. Provide `song-title` and `song-artist` (plus optional `song-album` / `song-duration`) to help identify the requested song. A standalone `query` can also be used as a search phrase.
-2. The component queries the lyric sources enabled through `allowed-sources`. If none of the selected sources return lyrics, it automatically falls back to LRCLIB.
-3. The footer shows the active lyric provider so you can see which source supplied the lyrics.
+1. lrc.red is the highest-priority provider. An `isrc` requests `/s/{isrc}.ttml` directly. Otherwise, `song-title` and `song-artist` use `/match.json`, including optional album and duration (converted from milliseconds to seconds). A standalone `query` uses `/search.json?q=...`. Match and search results supply the ISRC for the TTML download. If a direct ISRC lookup fails, the component tries the supplied track/artist or query.
+2. If lrc.red cannot serve usable lyrics, the component continues through BiniLyrics and the existing Unison, LyricsPlus, LRCLIB, and Genius fallbacks as metadata and synchronization quality allow. lrc.red does not accept Apple Music IDs directly.
+3. The footer shows the active provider, including “lrc.red”, and lets you load alternative sources. lrc.red uses the same TTML parser as BiniLyrics, and TTML downloads preserve the original file, including its timing, background vocals, and metadata. LRC, TTML and plain-text exports remain available.
 
-Providing as much song metadata as possible generally improves matching accuracy. If you already have the lyrics, you can bypass external lyric requests entirely by supplying `ttml` or `lrc` directly.
+Providing as much song metadata as possible generally improves matching accuracy. If you already have the lyrics, you can bypass external lyric requests entirely by supplying `ttml` or `lrc` directly
 
 ## Events
 
