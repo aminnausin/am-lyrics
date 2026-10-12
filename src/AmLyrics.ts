@@ -2,7 +2,7 @@ import { css, html, LitElement, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
 
-const VERSION = '1.8.1';
+const VERSION = '1.8.2';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Default timeout for lyrics fetch requests
 const LRC_RED_TIMEOUT_MS = 3000;
@@ -1011,12 +1011,18 @@ export class AmLyrics extends LitElement {
       transform-origin: 50% 80%;
     }
 
+    .lyrics-line:not(.far-line).active .char-motion,
+    .lyrics-line:not(.far-line).pre-active .char-motion {
+      will-change: transform;
+    }
+
     .lyrics-syllable .char-motion > .char {
       transform: none !important;
     }
 
     .reduced-motion .char-motion {
       transform: none !important;
+      will-change: auto !important;
     }
 
     .lyrics-syllable span.char {
@@ -7731,9 +7737,9 @@ export class AmLyrics extends LitElement {
       const spanDuration = Math.max(hold + response * 2, cjk ? 3 : 0);
       chars.forEach((char, index) => {
         const startDelay = (index + 1) * delayMs;
-        // A backwards-filled delayed transform changes Chromium's glyph paint
-        // before the character moves. Attach motion only when its stagger starts.
-        if (elapsed < startDelay) {
+        // Schedule before the stagger starts so host timestamp updates cannot
+        // delay its first frames. Forward fill leaves the waiting glyph untouched.
+        if (elapsed < 0) {
           AmLyrics.clearCharacterMotion(char);
           return;
         }
@@ -7747,16 +7753,16 @@ export class AmLyrics extends LitElement {
           if (!frames) {
             frames = Array.from({ length: 61 }, (_, frame) => {
               const time = (spanDuration * frame) / 60;
+              const finished = frame === 60;
               let rise = cjk
                 ? 1 -
                   AmLyrics.sampleSpring(1, 0, time, Math.sqrt(14), 3.5).position
                 : AmLyrics.springProgress(time, response);
-              if (frame === 60) rise = 1;
-              const envelope =
-                frame === 60
-                  ? 0
-                  : AmLyrics.springProgress(time, response) *
-                    (1 - AmLyrics.springProgress(time - hold, response));
+              if (finished) rise = 1;
+              const envelope = finished
+                ? 0
+                : AmLyrics.springProgress(time, response) *
+                  (1 - AmLyrics.springProgress(time - hold, response));
               const x =
                 (index - (count - 1) / 2) * 0.5 * 0.1 * emphasis * envelope;
               const lift = 2.5 * emphasis * envelope;
@@ -7796,10 +7802,13 @@ export class AmLyrics extends LitElement {
           const animation = motionTarget.animate(frames, {
             duration: spanDuration * 1000,
             delay: startDelay,
-            fill: 'both',
+            fill: 'forwards',
             easing: 'linear',
           });
-          animation.currentTime = Math.min(elapsed, end);
+          const timelineTime = animation.timeline?.currentTime;
+          if (typeof timelineTime === 'number')
+            animation.startTime = timelineTime - Math.min(elapsed, end);
+          else animation.currentTime = Math.min(elapsed, end);
           entry = {
             animation,
             start,
@@ -7812,14 +7821,20 @@ export class AmLyrics extends LitElement {
           AmLyrics.characterAnimations.set(char, entry);
           const motion = entry;
           animation.onfinish = () => {
-            if (AmLyrics.characterAnimations.get(char) !== motion) return;
+            if (
+              AmLyrics.characterAnimations.get(char) !== motion ||
+              animation.playState !== 'finished'
+            )
+              return;
             motionTarget.style.transform = motion.finalTransform;
             motion.settled = true;
             char.removeAttribute('data-glow');
             animation.cancel();
           };
         } else if (entry.settled) {
-          if (elapsed < entry.end)
+          // Match the drift tolerance above: a completed rise must not restart
+          // just because playback trails the native clock by a few frames.
+          if (elapsed < entry.end - 200)
             AmLyrics.resumeCharacterMotion(char, elapsed);
         } else if (
           Math.abs(
