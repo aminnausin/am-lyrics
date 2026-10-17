@@ -9,7 +9,7 @@ import type {
   Syllable,
 } from './LyricsSources.js';
 
-const VERSION = '1.8.3';
+const VERSION = '1.8.4';
 const SPICY_LYRICS_CLIENT_KEY =
   'sl_pk_8nNuJf0L-xFUv8L5uU-pfin69WU4j3IzzV2-T3GPWKY';
 const SPOTIFY_TOKEN_URL =
@@ -39,6 +39,7 @@ const CJK_WIPE_GRADIENT_EM = 0.3;
 const LONG_WORD_WIPE_EXTRA_EM = 0.45;
 const LONG_WORD_WIPE_EXTRA_RATIO = 0.35;
 const WORD_PRE_WIPE_HANDOFF_LEAD_MS = 100;
+const WORD_WIPE_LOOKAHEAD_MS = 500;
 const NEXT_LINE_BASE_BLUR_EM = 0.02;
 const NEXT_LINE_UNBLUR_DURATION_MS = 2000;
 const NORMAL_WORD_SPRING_DURATION_MS = 2000;
@@ -5459,6 +5460,11 @@ export class AmLyrics extends LitElement {
       if (!this.preActiveLineElements.includes(targetElement)) {
         this.preActiveLineElements.push(targetElement);
       }
+      AmLyrics.updateSyllablesForLine(
+        targetElement,
+        this.currentTime,
+        this.shouldReduceMotion,
+      );
     }
 
     // Commit backing spacing before measuring the destination. Its displacement
@@ -7266,6 +7272,31 @@ export class AmLyrics extends LitElement {
       .map(segment => segment.textContent || '')
       .join('')
       .replace(/\s/g, '');
+    // Resolve the handoff once, even if no player tick lands in its window.
+    let epoch = start;
+    const previousWord = word.previousElementSibling as HTMLElement | null;
+    const previousStart = Number(previousWord?.dataset.virtualWordStart);
+    const previousEnd = Math.min(
+      Number(previousWord?.dataset.virtualWordEnd),
+      start,
+    );
+    const previousSyllables = previousWord?.querySelectorAll<HTMLElement>(
+      '.lyrics-syllable:not(.transliteration)',
+    );
+    const previousSyllable = previousSyllables?.[previousSyllables.length - 1];
+    if (
+      previousStart < start &&
+      previousEnd > previousStart &&
+      start - previousEnd <= NEXT_WORD_PRE_WIPE_MAX_GAP_MS &&
+      previousSyllable &&
+      (AmLyrics.hasTextBoundaryAfter(previousSyllable) ||
+        /^\s/.test(syllables[0].textContent || ''))
+    ) {
+      epoch = Math.max(
+        start - AmLyrics.getWordPreWipeDuration(syllables[0], syllables),
+        previousEnd - WORD_PRE_WIPE_HANDOFF_LEAD_MS,
+      );
+    }
     const wipe: WordWipe = {
       syllables,
       fragments,
@@ -7277,7 +7308,7 @@ export class AmLyrics extends LitElement {
       end,
       rtl: syllable.classList.contains('rtl-text'),
       animations: [],
-      epoch: start,
+      epoch,
       prepared: false,
       settled: false,
     };
@@ -7288,7 +7319,7 @@ export class AmLyrics extends LitElement {
   private static startWordWipe(
     wipe: WordWipe,
     time: number,
-    epoch = wipe.start,
+    epoch = wipe.epoch,
     restore = false,
   ): void {
     if (wipe.animations.length) {
@@ -7296,13 +7327,23 @@ export class AmLyrics extends LitElement {
         for (const animation of wipe.animations) {
           // eslint-disable-next-line no-continue
           if (animation.playState !== 'idle') continue;
+          const effect = animation.effect as KeyframeEffect | null;
+          const target = effect?.target;
+          const fragment = wipe.fragments.find(item => item.element === target);
+          if (target instanceof HTMLElement && fragment) {
+            const feather =
+              fragment.fontSize *
+              Number.parseFloat(
+                target.style.getPropertyValue('--wipe-gradient-width'),
+              );
+            target.style.backgroundPosition = wipe.rtl
+              ? `${fragment.width + fragment.padding}px 0%`
+              : `${-wipe.width - feather - fragment.padding}px 0%`;
+          }
           animation.play();
-          animation.currentTime = Math.max(
-            0,
-            Math.min(
-              time - wipe.epoch,
-              Number(animation.effect?.getComputedTiming().endTime),
-            ),
+          animation.currentTime = Math.min(
+            time - wipe.epoch,
+            Number(animation.effect?.getComputedTiming().endTime),
           );
         }
         // eslint-disable-next-line no-param-reassign
@@ -7317,13 +7358,7 @@ export class AmLyrics extends LitElement {
       [];
     if (startEpoch < wipe.start)
       stops.push({ offset: 0, progress: 0, pre: true });
-    // Without a pre-wipe, keep the soft edge outside the first glyph at onset.
-    // Starting at zero exposes a feather-width of characters in one frame.
-    stops.push({
-      offset: (wipe.start - startEpoch) / duration,
-      progress: 0,
-      pre: startEpoch === wipe.start,
-    });
+    stops.push({ offset: (wipe.start - startEpoch) / duration, progress: 0 });
     let previousEnd = wipe.start;
     let progress = 0;
     for (const segment of wipe.segments) {
@@ -7344,6 +7379,11 @@ export class AmLyrics extends LitElement {
       const target = syllable;
       target.style.animation = 'none';
     });
+    const enterFromOutside =
+      startEpoch === wipe.start &&
+      wipe.fragments.some(fragment =>
+        fragment.element.classList.contains('char'),
+      );
     for (const {
       element,
       width,
@@ -7367,10 +7407,16 @@ export class AmLyrics extends LitElement {
       // so the shared edge keeps its original speed, softness and syllable stops.
       const lower = offset - feather - padding;
       const upper = offset + width + padding;
-      const positions = stops.map(stop => ({
-        offset: stop.offset,
-        edge: stop.progress - (stop.pre ? feather : 0),
-      }));
+      const positions = stops.map(stop => {
+        // Without a pre-wipe, the feather must enter from outside the word.
+        // Carry that distance through the shared path, not a short onset ramp
+        // that races over the first glyphs. An existing pre-wipe keeps its path.
+        let edge = stop.progress;
+        if (stop.pre) edge -= feather;
+        else if (enterFromOutside)
+          edge -= feather * (1 - stop.progress / wipe.width);
+        return { offset: stop.offset, edge };
+      });
       const samples: typeof positions = [];
       positions.forEach((stop, index) => {
         const previous = positions[index - 1];
@@ -7396,9 +7442,17 @@ export class AmLyrics extends LitElement {
         return { offset: stop.offset, backgroundPosition: `${x}px 0%` };
       });
       const finalPosition = frames[frames.length - 1].backgroundPosition;
-      element.style.backgroundPosition = finalPosition;
-      // eslint-disable-next-line no-continue
-      if (time >= wipe.end && !restore) continue;
+      // Keep pending/delayed effects unlit. A fully lit fallback can show
+      // through before the native effect reaches its first painted frame.
+      const unlitPosition = wipe.rtl
+        ? `${width + padding}px 0%`
+        : `${-wipe.width - feather - padding}px 0%`;
+      element.style.backgroundPosition = unlitPosition;
+      if (time >= wipe.end && !restore) {
+        element.style.backgroundPosition = finalPosition;
+        // eslint-disable-next-line no-continue
+        continue;
+      }
       let first = 0;
       let last = frames.length - 1;
       while (
@@ -7412,8 +7466,11 @@ export class AmLyrics extends LitElement {
         frames[last].backgroundPosition === frames[last - 1].backgroundPosition
       )
         last -= 1;
-      // eslint-disable-next-line no-continue
-      if (first === last) continue;
+      if (first === last) {
+        element.style.backgroundPosition = finalPosition;
+        // eslint-disable-next-line no-continue
+        continue;
+      }
       const from = frames[first].offset;
       const range = frames[last].offset - from;
       const localFrames =
@@ -7427,21 +7484,18 @@ export class AmLyrics extends LitElement {
         delay: range > 0 ? from * duration : 0,
         duration: range > 0 ? range * duration : duration,
         easing: 'linear',
-        fill: 'both',
+        fill: 'forwards',
       });
-      const elapsed = Math.max(
-        0,
-        Math.min(
-          time - startEpoch,
-          range > 0 ? frames[last].offset * duration : duration,
-        ),
+      const elapsed = Math.min(
+        time - startEpoch,
+        range > 0 ? frames[last].offset * duration : duration,
       );
+      animation.currentTime = elapsed;
       // Anchor every fragment to one document frame. Pending play tasks can
       // otherwise start early glyphs late, then jump when playback catches up.
       const timelineTime = animation.timeline?.currentTime;
       if (typeof timelineTime === 'number')
         animation.startTime = timelineTime - elapsed;
-      else animation.currentTime = elapsed;
       AmLyrics.wipeClocks.set(animation, startEpoch);
       wipe.animations.push(animation);
       animation.onfinish = () => {
@@ -7451,6 +7505,7 @@ export class AmLyrics extends LitElement {
           animation.playState !== 'finished'
         )
           return;
+        element.style.backgroundPosition = finalPosition;
         animation.cancel();
         wordWipe.settled = wordWipe.animations.every(
           effect => effect.playState === 'idle',
@@ -8357,8 +8412,10 @@ export class AmLyrics extends LitElement {
         element.classList.toggle('word-started', started);
       if (normal && !reduceMotion)
         AmLyrics.updateNormalWordMotion(element, start, currentTimeMs);
-      if (!started) return;
-      if (wipe) AmLyrics.startWordWipe(wipe, currentTimeMs);
+      // Native delays preserve the opening frames between sparse player ticks.
+      // Only prepare the nearby words, keeping long lines cheap to animate.
+      if (wipe && currentTimeMs >= wipe.epoch - WORD_WIPE_LOOKAHEAD_MS)
+        AmLyrics.startWordWipe(wipe, currentTimeMs);
     });
     if (!reduceMotion) AmLyrics.updateCharacterMotion(line, currentTimeMs);
     // DOM cache: avoid querySelectorAll on every frame
@@ -8975,25 +9032,18 @@ export class AmLyrics extends LitElement {
                 let syllableContent: any = text;
 
                 if (animateSyllable) {
-                  const numCharsInSyllable =
-                    Array.from(text.replace(/\s/g, '')).length || 1;
-                  let charIndexInsideSyllable = 0;
-
                   syllableContent = html`${Array.from(text).map(char => {
                     if (char === ' ') return ' ';
 
                     const charIndexInsideWord =
                       groupCharOffset + sylCharAccumulator;
-                    const localCharIndex = charIndexInsideSyllable;
                     sylCharAccumulator += 1;
-                    charIndexInsideSyllable += 1;
 
                     return html`<span class="char-motion"
                       ><span
                         class="char"
                         data-char-index="${charIndexInsideWord}"
                         data-syllable-char-index="${charIndexInsideWord}"
-                        style="--word-wipe-width: ${numCharsInSyllable}ch; --char-wipe-position: -${localCharIndex}ch"
                         >${char}</span
                       ></span
                     >`;
