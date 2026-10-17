@@ -1,8 +1,19 @@
-import { css, html, LitElement, svg } from 'lit';
+import { css, html, LitElement, nothing, svg } from 'lit';
 import { property, query, state } from 'lit/decorators.js';
 import { GoogleService } from './GoogleService.js';
+import { parseSpicyLyrics, secondsToMs } from './LyricsSources.js';
+import type {
+  LyricsContributor,
+  LyricsLine,
+  LyricsSourceResult as YouLyPlusLyricsResult,
+  Syllable,
+} from './LyricsSources.js';
 
-const VERSION = '1.8.2';
+const VERSION = '1.8.3';
+const SPICY_LYRICS_CLIENT_KEY =
+  'sl_pk_8nNuJf0L-xFUv8L5uU-pfin69WU4j3IzzV2-T3GPWKY';
+const SPOTIFY_TOKEN_URL =
+  'https://flxgjwpkztgpdywkgckk.supabase.co/functions/v1/spotify-token';
 const INSTRUMENTAL_THRESHOLD_MS = 7000; // Show dots for gaps >= 7s
 const FETCH_TIMEOUT_MS = 8000; // Default timeout for lyrics fetch requests
 const LRC_RED_TIMEOUT_MS = 3000;
@@ -60,15 +71,6 @@ const DEFAULT_KPOE_SOURCE_ORDER =
 
 const GENIUS_WORKER_URL = 'https://fetch-genius.samidy.workers.dev/';
 
-interface Syllable {
-  text: string;
-  part: boolean;
-  timestamp: number;
-  endtime: number;
-  romanizedText?: string;
-  lineSynced?: boolean; // New flag for line-synced lyrics
-}
-
 interface WordWipe {
   syllables: HTMLElement[];
   fragments: Array<{
@@ -104,22 +106,6 @@ interface LyricLayout {
   scrollTop: number;
 }
 
-interface LyricsLine {
-  text: Syllable[];
-  background: boolean;
-  backgroundText: Syllable[];
-  oppositeTurn: boolean;
-  timestamp: number;
-  endtime: number;
-  isWordSynced?: boolean;
-  alignment?: 'start' | 'end';
-  songPart?: string;
-  romanizedText?: string;
-  translation?: string;
-  agentId?: string;
-  direction?: 'ltr' | 'rtl';
-}
-
 interface SongMetadata {
   title: string;
   artist: string;
@@ -136,6 +122,7 @@ interface SongCatalogResult {
   songwriters?: string;
   id?: {
     appleMusic?: string;
+    spotify?: string;
     [key: string]: unknown;
   };
   isrc?: string;
@@ -147,18 +134,12 @@ interface ParsedQueryMetadata {
   album?: string;
 }
 
-interface YouLyPlusLyricsResult {
-  originalTTML?: string;
-  lines: LyricsLine[];
-  source: string;
-  songwriters?: string;
-}
-
 interface ResolvedMetadata {
   metadata?: SongMetadata;
   appleId?: string;
   appleSong?: any;
   catalogIsrc?: string;
+  spotifyId?: string;
 }
 
 export class AmLyrics extends LitElement {
@@ -1436,6 +1417,133 @@ export class AmLyrics extends LitElement {
       color: rgba(255, 255, 255, 0.5); /* Grey instead of primary */
     }
 
+    .contributor-stack {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+    }
+
+    .contributor-avatar,
+    .contributor-overflow > summary {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 32px;
+      width: 32px;
+      height: 32px;
+      box-sizing: border-box;
+      border-radius: 50%;
+      background: #303030;
+      color: #fff;
+      font: 500 12px/1 sans-serif;
+      text-decoration: none;
+      outline: 1px solid rgba(255, 255, 255, 0.16);
+      box-shadow: 0 0 0 2px #222;
+      cursor: pointer;
+    }
+
+    .contributor-stack > * + * {
+      margin-inline-start: -8px;
+    }
+
+    .contributor-avatar img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+      object-fit: cover;
+    }
+
+    .contributor-avatar:hover,
+    .contributor-avatar:focus-visible,
+    .contributor-overflow[open] {
+      z-index: 2;
+    }
+
+    .contributor-avatar:focus-visible,
+    .contributor-overflow > summary:focus-visible {
+      outline: 2px solid var(--lyplus-text-primary);
+      outline-offset: 3px;
+    }
+
+    .contributor-tooltip,
+    .contributor-menu {
+      position: absolute;
+      bottom: calc(100% + 10px);
+      inset-inline-start: 0;
+      padding: 9px 12px;
+      border-radius: 14px;
+      background: rgba(32, 32, 32, 0.85);
+      color: #fff;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.18),
+        0 8px 24px rgba(0, 0, 0, 0.25);
+      -webkit-backdrop-filter: blur(18px) saturate(1.4);
+      backdrop-filter: blur(18px) saturate(1.4);
+      font: 500 12px/1.4 sans-serif;
+    }
+
+    .contributor-tooltip {
+      width: max-content;
+      max-width: 220px;
+      opacity: 0;
+      transform: translateY(3px);
+      pointer-events: none;
+      transition:
+        opacity 140ms ease-out,
+        transform 140ms ease-out;
+    }
+
+    .contributor-avatar:hover .contributor-tooltip,
+    .contributor-avatar:focus-visible .contributor-tooltip {
+      opacity: 1;
+      transform: none;
+    }
+
+    .contributor-overflow {
+      position: relative;
+    }
+
+    .contributor-overflow > summary {
+      list-style: none;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .contributor-overflow > summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .contributor-menu {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: max-content;
+      max-width: min(260px, 70vw);
+      max-height: 220px;
+      overflow: auto;
+    }
+
+    .contributor-menu a {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 40px;
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .contributor-menu .contributor-avatar {
+      flex-shrink: 0;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .contributor-tooltip {
+        transition: none;
+      }
+    }
+
     .lyrics-container.blur-inactive-enabled:not(.not-focused)
       .lyrics-footer:not(.active) {
       filter: blur(var(--lyplus-blur-amount));
@@ -2060,6 +2168,9 @@ export class AmLyrics extends LitElement {
   @property({ type: String })
   musicId?: string;
 
+  @property({ type: String, attribute: 'spotify-id' })
+  spotifyId?: string;
+
   @property({ type: String })
   isrc?: string;
 
@@ -2450,6 +2561,8 @@ export class AmLyrics extends LitElement {
 
   private hasFetchedAllProviders = false;
 
+  private hasFetchedSpicyLyrics = false;
+
   private _updateFooter() {
     const footer = this.shadowRoot?.querySelector('.lyrics-footer');
     if (!footer) return;
@@ -2656,6 +2769,7 @@ export class AmLyrics extends LitElement {
     this.currentSourceIndex = 0;
     this.isFetchingAlternatives = false;
     this.hasFetchedAllProviders = false;
+    this.hasFetchedSpicyLyrics = false;
     this._updateFooter();
     try {
       if (this.ttml) {
@@ -2691,9 +2805,14 @@ export class AmLyrics extends LitElement {
           durationMs: this.songDurationMs || this.duration,
         },
         this.query?.trim(),
+        controller.signal,
       );
       if (controller.signal.aborted) return;
-      if (lrcRedResult) {
+      if (
+        lrcRedResult &&
+        !lrcRedResult.byModel &&
+        AmLyrics.hasWordSyncedLyrics(lrcRedResult.lines)
+      ) {
         this.availableSources = [lrcRedResult];
         this.lyrics = lrcRedResult.lines;
         this.lyricsSource = lrcRedResult.source;
@@ -2705,7 +2824,9 @@ export class AmLyrics extends LitElement {
         return;
       }
 
-      const resolvedMetadata = await this.resolveSongMetadata();
+      const resolvedMetadata = await this.resolveSongMetadata(
+        lrcRedResult?.metadata,
+      );
       // If a newer fetch was triggered while we awaited, bail out
       if (controller.signal.aborted) return;
 
@@ -2716,27 +2837,41 @@ export class AmLyrics extends LitElement {
         !this.query &&
         !this.isrc;
 
-      const collectedSources: YouLyPlusLyricsResult[] = [];
+      const collectedSources: YouLyPlusLyricsResult[] = lrcRedResult
+        ? [lrcRedResult]
+        : [];
+      const hasWordSync = (sources: YouLyPlusLyricsResult[]) =>
+        sources.some(s => AmLyrics.hasWordSyncedLyrics(s.lines));
 
       if (resolvedMetadata?.metadata && !isMusicIdOnlyRequest) {
         const title = resolvedMetadata.metadata.title?.trim() || '';
         const artist = resolvedMetadata.metadata.artist?.trim() || '';
 
-        const biniResult = await AmLyrics.fetchLyricsFromBiniLyrics(
-          title,
-          artist,
-          resolvedMetadata.catalogIsrc,
+        if (!lrcRedResult) {
+          const biniResult = await AmLyrics.fetchLyricsFromBiniLyrics(
+            title,
+            artist,
+            resolvedMetadata.catalogIsrc,
+            resolvedMetadata.metadata,
+          );
+          if (controller.signal.aborted) return;
+          if (biniResult?.lines.length) collectedSources.push(biniResult);
+        }
+      }
+
+      if (lrcRedResult?.byModel || !hasWordSync(collectedSources)) {
+        const spicyResult = await this.fetchLyricsFromSpicyLyrics(
+          resolvedMetadata.spotifyId,
+          controller.signal,
+          lrcRedResult?.isrc || resolvedMetadata.catalogIsrc,
           resolvedMetadata.metadata,
         );
-        if (biniResult && biniResult.lines.length > 0) {
-          collectedSources.push(biniResult);
-        }
+        if (controller.signal.aborted) return;
+        if (spicyResult) collectedSources.push(spicyResult);
+      }
 
-        const hasWordSync = (sources: YouLyPlusLyricsResult[]) =>
-          sources.some(s =>
-            s.lines.some(l => l.isWordSynced || (l.text && l.text.length > 1)),
-          );
-
+      if (resolvedMetadata?.metadata && !isMusicIdOnlyRequest) {
+        const { title, artist } = resolvedMetadata.metadata;
         if (collectedSources.length === 0 || !hasWordSync(collectedSources)) {
           const unisonResult = await AmLyrics.fetchLyricsFromUnison(
             resolvedMetadata.metadata,
@@ -2744,9 +2879,13 @@ export class AmLyrics extends LitElement {
           if (unisonResult && unisonResult.lines.length > 0) {
             collectedSources.push(unisonResult);
           }
+          if (controller.signal.aborted) return;
         }
 
-        if (collectedSources.length === 0 || !hasWordSync(collectedSources)) {
+        if (
+          !lrcRedResult &&
+          (collectedSources.length === 0 || !hasWordSync(collectedSources))
+        ) {
           const youLyResults = await AmLyrics.fetchLyricsFromYouLyPlus(
             title,
             artist,
@@ -2758,6 +2897,7 @@ export class AmLyrics extends LitElement {
           if (youLyResults && youLyResults.length > 0) {
             collectedSources.push(...youLyResults);
           }
+          if (controller.signal.aborted) return;
         }
       }
 
@@ -2792,6 +2932,7 @@ export class AmLyrics extends LitElement {
         }
       }
 
+      if (controller.signal.aborted) return;
       this.hasFetchedAllProviders =
         collectedSources.length === 0 ||
         collectedSources.some(
@@ -2853,16 +2994,23 @@ export class AmLyrics extends LitElement {
     }
   }
 
+  private static hasWordSyncedLyrics(lines: LyricsLine[]): boolean {
+    return lines.some(
+      line =>
+        line.isWordSynced ??
+        (line.text.length > 1 && !line.text.every(s => s.lineSynced)),
+    );
+  }
+
   private static getRankForCollected(
     sourceLabel: string,
     parsedLines: any[],
   ): number {
     const lower = sourceLabel.toLowerCase();
     if (lower === 'lrc.red') return 0;
-    const hasWordSync = parsedLines.some(
-      (line: any) =>
-        line.text && Array.isArray(line.text) && line.text.length > 1,
-    );
+    if (lower.includes('bini')) return 2;
+    if (lower.startsWith('spicy lyrics')) return 2.5;
+    const hasWordSync = AmLyrics.hasWordSyncedLyrics(parsedLines);
     const isUnsynced =
       parsedLines.length > 0 &&
       parsedLines.every(
@@ -2926,11 +3074,24 @@ export class AmLyrics extends LitElement {
       }
     }
 
-    return Array.from(uniqueSourcesMap.values()).sort(
-      (a, b) =>
-        AmLyrics.getRankForCollected(a.source, a.lines) -
-        AmLyrics.getRankForCollected(b.source, b.lines),
+    const sources = Array.from(uniqueSourcesMap.values());
+    const upgradeLrcRedLines = sources.some(
+      source =>
+        source.source === 'lrc.red' &&
+        !AmLyrics.hasWordSyncedLyrics(source.lines),
     );
+    return sources.sort((a, b) => {
+      if (upgradeLrcRedLines) {
+        const timingRank =
+          Number(AmLyrics.hasWordSyncedLyrics(b.lines)) -
+          Number(AmLyrics.hasWordSyncedLyrics(a.lines));
+        if (timingRank) return timingRank;
+      }
+      return (
+        (a.byModel ? 2.75 : AmLyrics.getRankForCollected(a.source, a.lines)) -
+        (b.byModel ? 2.75 : AmLyrics.getRankForCollected(b.source, b.lines))
+      );
+    });
   }
 
   private findCurrentSourceIndex(
@@ -2987,6 +3148,7 @@ export class AmLyrics extends LitElement {
   private async switchSource() {
     if (this.isFetchingAlternatives) return;
 
+    const controller = this.fetchAbortController;
     const currentSourceLabel = this.lyricsSource;
     const currentLines = this.lyrics;
 
@@ -2994,20 +3156,39 @@ export class AmLyrics extends LitElement {
       this.isFetchingAlternatives = true;
       this._updateFooter();
       try {
-        const resolvedMetadata = await this.resolveSongMetadata();
-        if (resolvedMetadata?.metadata) {
-          const newSources: YouLyPlusLyricsResult[] = [];
+        const resolvedMetadata = await this.resolveSongMetadata(
+          this.availableSources.find(s => s.source === 'lrc.red')?.metadata,
+        );
+        if (controller?.signal.aborted) return;
+        const newSources: YouLyPlusLyricsResult[] = [];
+        if (
+          resolvedMetadata.metadata &&
+          !this.availableSources.some(s => s.byModel) &&
+          !this.availableSources.some(s => s.source === 'BiniLyrics')
+        ) {
+          const biniResult = await AmLyrics.fetchLyricsFromBiniLyrics(
+            resolvedMetadata.metadata.title,
+            resolvedMetadata.metadata.artist,
+            resolvedMetadata.catalogIsrc,
+            resolvedMetadata.metadata,
+          );
+          if (biniResult) newSources.push(biniResult);
+          if (controller?.signal.aborted) return;
+        }
 
-          if (!this.availableSources.some(s => s.source === 'BiniLyrics')) {
-            const biniResult = await AmLyrics.fetchLyricsFromBiniLyrics(
-              resolvedMetadata.metadata.title,
-              resolvedMetadata.metadata.artist,
+        if (!this.hasFetchedSpicyLyrics) {
+          const spicyResult = await this.fetchLyricsFromSpicyLyrics(
+            resolvedMetadata.spotifyId,
+            controller?.signal,
+            this.availableSources.find(s => s.source === 'lrc.red')?.isrc ||
               resolvedMetadata.catalogIsrc,
-              resolvedMetadata.metadata,
-            );
-            if (biniResult) newSources.push(biniResult);
-          }
+            resolvedMetadata.metadata,
+          );
+          if (controller?.signal.aborted) return;
+          if (spicyResult) newSources.push(spicyResult);
+        }
 
+        if (resolvedMetadata.metadata) {
           // Try Unison if not fetched
           if (
             !this.availableSources.some(s =>
@@ -3070,25 +3251,25 @@ export class AmLyrics extends LitElement {
               newSources.push({ lines: geniusResult.lines, source: 'Genius' });
             }
           }
-
-          if (newSources.length > 0) {
-            this.availableSources = AmLyrics.mergeAndSortSources([
-              ...this.availableSources,
-              ...newSources,
-            ]);
-            // Re-sync current index since sorting or label normalization can
-            // shift the currently displayed source underneath the old index.
-            this.currentSourceIndex = this.findCurrentSourceIndex(
-              this.availableSources,
-              currentSourceLabel,
-              currentLines,
-            );
-          }
+        }
+        if (controller?.signal.aborted) return;
+        if (newSources.length > 0) {
+          this.availableSources = AmLyrics.mergeAndSortSources([
+            ...this.availableSources,
+            ...newSources,
+          ]);
+          this.currentSourceIndex = this.findCurrentSourceIndex(
+            this.availableSources,
+            currentSourceLabel,
+            currentLines,
+          );
         }
       } finally {
-        this.hasFetchedAllProviders = true;
-        this.isFetchingAlternatives = false;
-        this._updateFooter();
+        if (!controller?.signal.aborted) {
+          this.hasFetchedAllProviders = true;
+          this.isFetchingAlternatives = false;
+          this._updateFooter();
+        }
       }
     }
 
@@ -3110,13 +3291,15 @@ export class AmLyrics extends LitElement {
     }
   }
 
-  private async resolveSongMetadata(): Promise<ResolvedMetadata> {
+  private async resolveSongMetadata(
+    fallback?: SongMetadata,
+  ): Promise<ResolvedMetadata> {
     const metadata: SongMetadata = {
-      title: this.songTitle?.trim() ?? '',
-      artist: this.songArtist?.trim() ?? '',
-      album: this.songAlbum?.trim() || undefined,
+      title: this.songTitle?.trim() || fallback?.title || '',
+      artist: this.songArtist?.trim() || fallback?.artist || '',
+      album: this.songAlbum?.trim() || fallback?.album,
       songwriters: this.songwriters?.trim() || undefined,
-      durationMs: undefined,
+      durationMs: fallback?.durationMs,
     };
 
     if (typeof this.songDurationMs === 'number' && this.songDurationMs > 0) {
@@ -3208,7 +3391,134 @@ export class AmLyrics extends LitElement {
       appleId,
       appleSong,
       catalogIsrc,
+      spotifyId: this.spotifyId?.trim() || catalogResult?.id?.spotify,
     };
+  }
+
+  private static spotifyToken?: { value: string; expiresAt: number };
+
+  private static spotifyTokenRequest?: Promise<string | null>;
+
+  private static async getSpotifyToken(): Promise<string | null> {
+    if (AmLyrics.spotifyToken && AmLyrics.spotifyToken.expiresAt > Date.now())
+      return AmLyrics.spotifyToken.value;
+    if (AmLyrics.spotifyTokenRequest) return AmLyrics.spotifyTokenRequest;
+
+    // Share one request across component instances; a track change must not
+    // cancel a refresh that another instance is still waiting for.
+    AmLyrics.spotifyTokenRequest = (async () => {
+      const requestedAt = Date.now();
+      try {
+        const response = await fetchWithTimeout(SPOTIFY_TOKEN_URL, {
+          method: 'POST',
+        });
+        if (!response.ok) return null;
+        const payload = await response.json();
+        const lifetime = payload.expires_in * 1000;
+        if (
+          typeof payload.access_token !== 'string' ||
+          !payload.access_token.trim() ||
+          !Number.isFinite(lifetime) ||
+          lifetime <= 0
+        )
+          return null;
+        AmLyrics.spotifyToken = {
+          value: payload.access_token,
+          expiresAt: requestedAt + lifetime - Math.min(30000, lifetime * 0.1),
+        };
+        return AmLyrics.spotifyToken.value;
+      } catch {
+        return null;
+      }
+    })();
+    try {
+      return await AmLyrics.spotifyTokenRequest;
+    } finally {
+      AmLyrics.spotifyTokenRequest = undefined;
+    }
+  }
+
+  private async fetchLyricsFromSpicyLyrics(
+    spotifyId?: string,
+    signal?: AbortSignal,
+    isrc?: string,
+    metadata?: SongMetadata,
+  ): Promise<YouLyPlusLyricsResult | null> {
+    this.hasFetchedSpicyLyrics = true;
+    const controller = new AbortController();
+    const abort = () => controller.abort();
+    if (signal?.aborted) return null;
+    signal?.addEventListener('abort', abort, { once: true });
+    const timeout = setTimeout(abort, FETCH_TIMEOUT_MS);
+    try {
+      let trackId = spotifyId;
+      if (!trackId) {
+        let searchTerm = isrc ? `isrc:${isrc}` : '';
+        if (!searchTerm && metadata?.title && metadata.artist)
+          searchTerm = `track:${metadata.title} artist:${metadata.artist}`;
+        if (!searchTerm) return null;
+        const search = new URLSearchParams({
+          q: searchTerm,
+          type: 'track',
+          limit: isrc ? '1' : '5',
+        });
+        let token = await AmLyrics.getSpotifyToken();
+        if (!token || controller.signal.aborted) return null;
+        const lookupTrack = (accessToken: string) =>
+          fetch(`https://api.spotify.com/v1/search?${search}`, {
+            signal: controller.signal,
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+        let lookup = await lookupTrack(token);
+        if (lookup.status === 401) {
+          if (AmLyrics.spotifyToken?.value === token)
+            AmLyrics.spotifyToken = undefined;
+          token = await AmLyrics.getSpotifyToken();
+          if (!token || controller.signal.aborted) return null;
+          lookup = await lookupTrack(token);
+        }
+        if (!lookup.ok) return null;
+        const result = await lookup.json();
+        const tracks = Array.isArray(result?.tracks?.items)
+          ? result.tracks.items
+          : [];
+        const normalize = (value: string) =>
+          value.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+        const match = isrc
+          ? tracks.find(
+              (track: any) =>
+                !track.external_ids?.isrc ||
+                track.external_ids.isrc.toUpperCase() === isrc.toUpperCase(),
+            )
+          : tracks.find(
+              (track: any) =>
+                normalize(track.name || '') === normalize(metadata!.title) &&
+                track.artists?.some(
+                  (artist: any) =>
+                    normalize(artist.name || '') ===
+                    normalize(metadata!.artist),
+                ) &&
+                (!metadata!.durationMs ||
+                  Math.abs(track.duration_ms - metadata!.durationMs) <= 3000),
+            );
+        trackId = match?.id;
+      }
+      if (!trackId || !/^[A-Za-z0-9]{22}$/.test(trackId)) return null;
+      const response = await fetch(
+        `https://api.spicylyrics.org/v1/lyrics/${encodeURIComponent(trackId)}`,
+        {
+          signal: controller.signal,
+          headers: { Authorization: `Bearer ${SPICY_LYRICS_CLIENT_KEY}` },
+        },
+      );
+      if (!response.ok) return null;
+      return parseSpicyLyrics(await response.json());
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timeout);
+      signal?.removeEventListener('abort', abort);
+    }
   }
 
   private static parseQueryMetadata(
@@ -3296,25 +3606,50 @@ export class AmLyrics extends LitElement {
     isrc?: string,
     metadata: { durationMs?: number; album?: string } = {},
     searchQuery = '',
+    signal: AbortSignal | undefined = undefined,
   ): Promise<YouLyPlusLyricsResult | null> {
+    if (signal?.aborted) return null;
     const controller = new AbortController();
+    const abort = () => controller.abort();
+    signal?.addEventListener('abort', abort, { once: true });
     const timeoutId = setTimeout(() => controller.abort(), LRC_RED_TIMEOUT_MS);
     try {
-      const fetchTTML = async (trackIsrc: string) => {
+      const fetchSong = async (trackIsrc: string) => {
         try {
           const response = await fetch(
-            `https://lrc.red/s/${encodeURIComponent(trackIsrc)}.ttml`,
+            `https://lrc.red/s/${encodeURIComponent(trackIsrc)}.song.json`,
             { signal: controller.signal },
           );
           if (!response.ok) return null;
-          const originalTTML = await response.text();
-          const parsed = AmLyrics.parseTTML(originalTTML);
-          if (!parsed?.lines.length) return null;
+          const song = await response.json();
+          // The JSON also carries the original TTML, including its alternates
+          // and background vocals. Keep that for lossless rendering/downloads.
+          const originalTTML =
+            typeof song.source === 'string' ? song.source : undefined;
+          const parsed = originalTTML ? AmLyrics.parseTTML(originalTTML) : null;
+          const lines = parsed?.lines.length
+            ? parsed.lines
+            : AmLyrics.parseLrcRedJson(song);
+          if (!lines.length) return null;
           return {
-            lines: parsed.lines,
+            lines,
             source: 'lrc.red',
             originalTTML,
-            songwriters: parsed.songwriters,
+            byModel: song.byModel === true,
+            isrc: trackIsrc,
+            metadata:
+              typeof song.title === 'string' && typeof song.artist === 'string'
+                ? {
+                    title: song.title,
+                    artist: song.artist,
+                    album:
+                      typeof song.album === 'string' ? song.album : undefined,
+                    durationMs: secondsToMs(song.duration) || undefined,
+                  }
+                : undefined,
+            songwriters: Array.isArray(song.songwriters)
+              ? song.songwriters.join(', ')
+              : parsed?.songwriters,
           };
         } catch {
           return null;
@@ -3322,7 +3657,7 @@ export class AmLyrics extends LitElement {
       };
 
       if (isrc) {
-        const result = await fetchTTML(isrc);
+        const result = await fetchSong(isrc);
         if (result) return result;
         if (controller.signal.aborted) return null;
       }
@@ -3354,7 +3689,7 @@ export class AmLyrics extends LitElement {
         const payload = await response.json();
         const hit = Array.isArray(payload?.hits) ? payload.hits[0] : undefined;
         if (typeof hit?.isrc === 'string' && hit.isrc.trim()) {
-          return await fetchTTML(hit.isrc.trim());
+          return await fetchSong(hit.isrc.trim());
         }
       } catch {
         // Continue with the existing providers when lrc.red is unavailable.
@@ -3362,7 +3697,61 @@ export class AmLyrics extends LitElement {
       return null;
     } finally {
       clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', abort);
     }
+  }
+
+  private static parseLrcRedJson(song: any): LyricsLine[] {
+    const entries = song?.lyrics?.lines;
+    if (!Array.isArray(entries)) return [];
+    return entries.flatMap((line: any): LyricsLine[] => {
+      if (typeof line?.text !== 'string' || !line.text.trim()) return [];
+      const timestamp = secondsToMs(line.begin);
+      const endtime = secondsToMs(line.end, timestamp);
+      const wordSynced =
+        song.lyrics.sync === 'word' &&
+        Array.isArray(line.words) &&
+        line.words.length > 0;
+      const text: Syllable[] = wordSynced
+        ? line.words.flatMap((word: any[], wordIndex: number) =>
+            Array.isArray(word)
+              ? word.map((syllable: any, index: number) => {
+                  const part = index < word.length - 1;
+                  const space =
+                    !part && wordIndex < line.words.length - 1 ? ' ' : '';
+                  return {
+                    text: `${syllable.text || ''}${space}`,
+                    part,
+                    timestamp: secondsToMs(syllable.begin, timestamp),
+                    endtime: secondsToMs(syllable.end, endtime),
+                  };
+                })
+              : [],
+          )
+        : [
+            {
+              text: line.text,
+              part: false,
+              timestamp,
+              endtime,
+              lineSynced: true,
+            },
+          ];
+      return text.length
+        ? [
+            {
+              text,
+              background: false,
+              backgroundText: [],
+              oppositeTurn: line.voice === 'b',
+              agentId: line.voice,
+              timestamp,
+              endtime,
+              isWordSynced: wordSynced,
+            },
+          ]
+        : [];
+    });
   }
 
   private static async fetchLyricsFromBiniLyrics(
@@ -4908,6 +5297,7 @@ export class AmLyrics extends LitElement {
     if (
       (changedProperties.has('query') ||
         changedProperties.has('musicId') ||
+        changedProperties.has('spotifyId') ||
         changedProperties.has('isrc') ||
         changedProperties.has('ttml') ||
         changedProperties.has('songTitle') ||
@@ -6927,7 +7317,13 @@ export class AmLyrics extends LitElement {
       [];
     if (startEpoch < wipe.start)
       stops.push({ offset: 0, progress: 0, pre: true });
-    stops.push({ offset: (wipe.start - startEpoch) / duration, progress: 0 });
+    // Without a pre-wipe, keep the soft edge outside the first glyph at onset.
+    // Starting at zero exposes a feather-width of characters in one frame.
+    stops.push({
+      offset: (wipe.start - startEpoch) / duration,
+      progress: 0,
+      pre: startEpoch === wipe.start,
+    });
     let previousEnd = wipe.start;
     let progress = 0;
     for (const segment of wipe.segments) {
@@ -7033,17 +7429,27 @@ export class AmLyrics extends LitElement {
         easing: 'linear',
         fill: 'both',
       });
-      animation.currentTime = Math.max(
+      const elapsed = Math.max(
         0,
         Math.min(
           time - startEpoch,
           range > 0 ? frames[last].offset * duration : duration,
         ),
       );
+      // Anchor every fragment to one document frame. Pending play tasks can
+      // otherwise start early glyphs late, then jump when playback catches up.
+      const timelineTime = animation.timeline?.currentTime;
+      if (typeof timelineTime === 'number')
+        animation.startTime = timelineTime - elapsed;
+      else animation.currentTime = elapsed;
       AmLyrics.wipeClocks.set(animation, startEpoch);
       wipe.animations.push(animation);
       animation.onfinish = () => {
-        if (!wordWipe.prepared || !wordWipe.animations.includes(animation))
+        if (
+          !wordWipe.prepared ||
+          !wordWipe.animations.includes(animation) ||
+          animation.playState !== 'finished'
+        )
           return;
         animation.cancel();
         wordWipe.settled = wordWipe.animations.every(
@@ -8241,6 +8647,74 @@ export class AmLyrics extends LitElement {
     URL.revokeObjectURL(url);
   }
 
+  private renderContributors() {
+    const people = this.availableSources[this.currentSourceIndex]?.contributors;
+    if (!people?.length) return nothing;
+    const portrait = (person: LyricsContributor) => html`
+      <span aria-hidden="true">${Array.from(person.username)[0]}</span>
+      ${person.avatar
+        ? html`<img
+            src=${person.avatar}
+            alt=""
+            width="32"
+            height="32"
+            loading="lazy"
+            decoding="async"
+            @error=${(event: Event) => {
+              const image = event.currentTarget as HTMLImageElement;
+              image.hidden = true;
+            }}
+            @load=${(event: Event) => {
+              const image = event.currentTarget as HTMLImageElement;
+              image.hidden = false;
+            }}
+          />`
+        : nothing}
+    `;
+    return html`<div class="contributor-stack">
+      ${people
+        .slice(0, 3)
+        .map(
+          person =>
+            html`<a
+              class="contributor-avatar"
+              href=${person.url || nothing}
+              target="_blank"
+              rel="noopener noreferrer"
+              tabindex="0"
+              aria-label=${`${person.username} — ${person.roles.join(', ')}`}
+              >${portrait(person)}<span
+                class="contributor-tooltip"
+                aria-hidden="true"
+                >${person.username} · ${person.roles.join(', ')}</span
+              ></a
+            >`,
+        )}
+      ${people.length > 3
+        ? html`<details class="contributor-overflow">
+            <summary aria-label=${`${people.length - 3} more contributors`}>
+              +${people.length - 3}
+            </summary>
+            <div class="contributor-menu">
+              ${people.slice(3).map(
+                person =>
+                  html`<a
+                    href=${person.url || nothing}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    tabindex="0"
+                    ><span class="contributor-avatar">${portrait(person)}</span
+                    ><span
+                      >${person.username}<br />${person.roles.join(', ')}</span
+                    ></a
+                  >`,
+              )}
+            </div>
+          </details>`
+        : nothing}
+    </div>`;
+  }
+
   render() {
     if (this.fontFamily) {
       this.style.fontFamily = this.fontFamily;
@@ -8793,11 +9267,12 @@ export class AmLyrics extends LitElement {
           ? html`
               <footer class="lyrics-footer lyrics-line">
                 <div class="footer-content">
-                  <span
+                  <div
                     class="source-info"
                     style="display: flex; align-items: center; gap: 8px;"
                   >
                     <b style="font-weight: 750;">Source</b> ${sourceLabel}
+                    ${this.renderContributors()}
                     ${(this.availableSources &&
                       this.availableSources.length > 1) ||
                     !this.hasFetchedAllProviders
@@ -8842,7 +9317,7 @@ export class AmLyrics extends LitElement {
                           </button>
                         `
                       : ''}
-                  </span>
+                  </div>
                   ${this.songwriters
                     ? html`<span
                         class="songwriters-info"
