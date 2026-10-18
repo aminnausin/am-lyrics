@@ -11,6 +11,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aminnausin/am-lyrics"
+  },
+  "bugs": {
+    "url": "https://github.com/aminnausin/am-lyrics/issues"
+  },
+  "homepage": "https://github.com/aminnausin/am-lyrics",
   "exports": {
     ".": "./dist/src/index.js",
     "./am-lyrics.js": "./dist/src/am-lyrics.js",
