@@ -42,6 +42,7 @@ npm install @aminnausin/am-lyrics
 | ------------------------ | --------- | ----------- | ---------------------------------------------------------------------------------------------- |
 | `query`                  | `string`  | `undefined` | Search phrase for lrc.red, with LyricsPlus catalog fallback |
 | `music-id`               | `string`  | `undefined` | Specific Apple Music song ID (served through the backup Apple endpoint)                        |
+| `spotify-id`             | `string`  | `undefined` | Spotify track ID for Spicy Lyrics; skips the Spotify search when supplied                       |
 | `isrc`                   | `string`  | `undefined` | ISRC code for direct lrc.red TTML lookup and provider matching |
 | `ttml`                   | `string`  | `undefined` | A string of TTML formatted lyrics to be rendered directly (bypasses all external requests)     |
 | `lrc`                   | `string`  | `undefined` | A string of LRC formatted lyrics to be rendered directly (Is used as the default fallback if ttml fails)     |
@@ -56,7 +57,7 @@ npm install @aminnausin/am-lyrics
 | `font-family`            | `string`  | `undefined` | Custom font family for lyrics                                                                  |
 | `autoscroll`             | `boolean` | `true`      | Enable automatic scrolling to active lyrics                                                    |
 | `interpolate`            | `boolean` | `true`      | Enable smooth word-by-word highlighting animation                                              |
-| `allowed-sources`        | `string`  | `undefined` | Comma-separated list of optional lyric sources to query: `lrcred`, `bini`, `unison`, `lyplus`, and `genius`. LRCLIB is always used as the final fallback and is not affected. |
+| `allowed-sources`        | `string`  | `undefined` | Comma-separated list of optional lyric sources to query: `lrcred`, `spicy`, `bini`, `unison`, `lyplus`, and `genius`. LRCLIB is always used as the final fallback and is not affected. |
 
 ## CSS Custom Properties (CSS Variables)
 
@@ -112,9 +113,12 @@ responsive values. CSS variables take precedence over the properties above.
 
 ## Lyrics matching
 
-1. lrc.red is the highest-priority provider. An `isrc` requests `/s/{isrc}.ttml` directly. Otherwise, `song-title` and `song-artist` use `/match.json`, including optional album and duration (converted from milliseconds to seconds). A standalone `query` uses `/search.json?q=...`. Match and search results supply the ISRC for the TTML download. If a direct ISRC lookup fails, the component tries the supplied track/artist or query.
-2. If lrc.red cannot serve usable lyrics, the component continues through BiniLyrics and the existing Unison, LyricsPlus, LRCLIB, and Genius fallbacks as metadata and synchronization quality allow. lrc.red does not accept Apple Music IDs directly.
-3. The footer shows the active provider, including “lrc.red”, and lets you load alternative sources. lrc.red uses the same TTML parser as BiniLyrics, and TTML downloads preserve the original file, including its timing, background vocals, and metadata. LRC, TTML and plain-text exports remain available.
+1. lrc.red is the highest-priority provider. An `isrc` requests `/s/{isrc}.song.json` directly, with a three-second timeout. Otherwise, `song-title` and `song-artist` use `/match.json`, including optional album and duration (converted from milliseconds to seconds). A standalone `query` uses `/search.json?q=...`. Match and search results supply the ISRC for the song JSON. If a direct ISRC lookup fails, the component tries the supplied track/artist or query.
+2. BiniLyrics comes next, followed by Spicy Lyrics, then the existing Unison, LyricsPlus, LRCLIB, and Genius fallbacks as metadata and synchronization quality allow. If lrc.red returns `byModel: true`, BiniLyrics is skipped and Spicy Lyrics is preferred; the model result remains available if Spicy has no lyrics.
+   If lrc.red only has line-synced lyrics, the component checks Spicy Lyrics, then Unison for word-synced lyrics before falling back to the lrc.red lines. lrc.red's song metadata also enables this lookup when only an ISRC was supplied.
+3. Spicy Lyrics accepts Spotify track IDs. Supply `spotify-id` directly, or the component searches Spotify by ISRC (including the ISRC matched by lrc.red), then by track/artist when no ISRC is available. Spotify tokens are fetched with a POST to the token service and cached in memory until shortly before their returned expiry; a rejected token is refreshed once. Lookup failures fall through to the remaining sources. The Spicy client key must allow your app's origin in its dashboard. Spicy supports word, line and untimed lyrics, background vocals, and supplied translations/romanizations.
+
+The footer shows the active provider and lets you load alternative sources. Community Spicy Lyrics syncs show linked contributor avatars with username tooltips. lrc.red's JSON includes the original TTML, which is preserved for rendering and TTML downloads, including its timing, background vocals, and metadata. LRC and plain-text exports remain available for individual tracks.
 
 Providing as much song metadata as possible generally improves matching accuracy. If you already have the lyrics, you can bypass external lyric requests entirely by supplying `ttml` or `lrc` directly
 
